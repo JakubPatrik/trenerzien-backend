@@ -1,0 +1,1 @@
+UPDATE public.content_videos SET title = 'Úvod do Príjemnej premeny', description = 'Vysvetlenie celej Príjemnej premeny — ako funguje, prečo funguje a čo ťa čaká v 7 krokoch. Prvé výsledky: redukcia 8–12 kg za prvé 2–3 mesiace bez cvičenia, veľmi príjemným spôsobom.' WHERE slug = 'etapa-1';

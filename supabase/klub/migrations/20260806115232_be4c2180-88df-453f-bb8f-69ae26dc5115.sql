@@ -1,0 +1,3 @@
+REVOKE EXECUTE ON FUNCTION public.member_directory() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.member_directory() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.member_directory() TO authenticated;

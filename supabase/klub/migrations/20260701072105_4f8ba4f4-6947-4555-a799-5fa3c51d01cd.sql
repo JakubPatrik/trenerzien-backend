@@ -1,0 +1,1 @@
+ALTER TABLE public.challenge_days ADD COLUMN IF NOT EXISTS youtube_id TEXT;
