@@ -1,2 +1,7 @@
+.env
+.env.local
+
 **/export/**/*.json
 **/export/**/*.jpg
+
+supabase/web/backfill/
