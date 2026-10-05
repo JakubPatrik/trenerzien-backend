@@ -1,6 +1,7 @@
-// Shared HTML layout for our SmartEmailing emails (booking, invitations):
+// Shared HTML layout for our SmartEmailing emails (booking, invitations, applications):
 // black header with the wordmark, eyebrow + headline with an italic accent word,
-// optional detail table, red button, note with a red left border, black footer.
+// optional detail table, optional stacked answers (question above, free text below),
+// red button, note with a red left border, black footer.
 
 export const RED = "#B8292F";
 export const INK = "#0B0B0D";
@@ -29,6 +30,7 @@ export type Layout = {
   accent: string;
   intro: string; // HTML
   rows?: [label: string, value: string][]; // HTML values
+  answers?: [question: string, answer: string][]; // HTML answers; long free text, stacked
   button: { label: string; href: string };
   note: string; // HTML
   year: number;
@@ -52,6 +54,17 @@ export function layout(l: Layout): string {
       </table>
     </td></tr>`
     : "";
+  const answers = l.answers ?? [];
+  const answer = ([question, text]: [string, string], i: number) => `
+        <div style="padding:${i ? "18px" : "0"} 0 18px;${i ? `border-top:1px solid ${LINE};` : ""}">
+          <div style="font-family:${FONT_MONO};font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${MUTED};">${question}</div>
+          <div style="margin-top:8px;font-family:${FONT_SANS};font-size:16px;line-height:1.5;color:${INK};">${text}</div>
+        </div>`;
+  const answerBlock = answers.length
+    ? `
+    <tr><td style="padding:28px 32px 0;">${answers.map(answer).join("")}
+    </td></tr>`
+    : "";
 
   return `<!doctype html>
 <html lang="sk"><head>
@@ -69,7 +82,7 @@ export function layout(l: Layout): string {
       <div style="font-family:${FONT_MONO};font-size:12px;letter-spacing:4px;text-transform:uppercase;color:${RED};">${l.eyebrow}</div>
       <h1 style="margin:14px 0 0;font-family:${FONT_DISPLAY};font-size:44px;line-height:1;font-weight:normal;text-transform:uppercase;color:${INK};">${l.headline} <span style="font-family:${FONT_SERIF};font-style:italic;text-transform:none;color:${RED};">${l.accent}</span></h1>
       <p style="margin:16px 0 0;font-family:${FONT_SANS};font-size:16px;line-height:1.5;color:#444;">${l.intro}</p>
-    </td></tr>${table}
+    </td></tr>${table}${answerBlock}
     <tr><td style="padding:24px 32px 0;">
       <a href="${escapeHtml(l.button.href)}" style="display:block;background:${RED};color:#FFFFFF;text-align:center;padding:17px;font-family:${FONT_SANS};font-size:17px;font-weight:600;text-decoration:none;">${l.button.label}</a>
     </td></tr>

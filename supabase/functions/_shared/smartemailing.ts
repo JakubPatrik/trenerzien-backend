@@ -71,3 +71,37 @@ export async function sendEmail(email: Email): Promise<string | null> {
   }
   return body.data?.[0]?.id ?? null;
 }
+
+// Adds or updates a contact and puts it on the given contact lists (POST /import).
+export async function importContact(
+  contact: { email: string; name?: string; phone?: string },
+  listIds: number[],
+): Promise<void> {
+  const username = Deno.env.get("SMARTEMAILING_USERNAME");
+  const apiKey = Deno.env.get("SMARTEMAILING_API_KEY");
+  if (!username || !apiKey) throw new NotConfiguredError("SmartEmailing credentials not configured");
+
+  const [first, ...rest] = (contact.name ?? "").trim().split(/\s+/);
+  const res = await fetch("https://app.smartemailing.cz/api/v3/import", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${btoa(`${username}:${apiKey}`)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      settings: { update: true, add_namedays: false, add_genders: false },
+      data: [{
+        emailaddress: contact.email,
+        ...(first ? { name: first } : {}),
+        ...(rest.length ? { surname: rest.join(" ") } : {}),
+        ...(contact.phone ? { cellphone: contact.phone } : {}),
+        contactlists: listIds.map((id) => ({ id, status: "confirmed" })),
+      }],
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.status === "error") {
+    throw new Error(`SmartEmailing import failed (${res.status}): ${body.message ?? JSON.stringify(body).slice(0, 300)}`);
+  }
+}
