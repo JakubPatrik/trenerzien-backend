@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Test 4.sql (booking) on a throwaway LOCAL Postgres — never touches Supabase.
+# Test 4.sql + 5.sql (booking, KLUB guides) on a throwaway LOCAL Postgres — never touches Supabase.
 # Needs Postgres binaries (brew install postgresql@17). Steps:
 #   1. temp cluster + minimal Supabase stand-ins (roles, auth.users, auth.uid(), has_role)
-#   2. 0.sql (consultation_applications) + 4.sql twice (must be re-runnable)
-#   3. booking-test.sql assertions
+#   2. 0.sql (consultation_applications) + 4.sql, 5.sql twice (must be re-runnable)
+#   3. booking-test.sql + booking-guides-test.sql assertions
 #   4. 30 concurrent bookings on 3 slots → exactly 2 per slot (2 helpers), no deadlocks
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -32,15 +32,21 @@ CREATE TABLE public.user_roles (user_id uuid, role app_role, UNIQUE (user_id, ro
 CREATE FUNCTION public.has_role(_user_id uuid, _role app_role) RETURNS boolean
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
   AS $$ SELECT EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id AND role = _role) $$;
+CREATE TYPE membership_status AS ENUM ('active', 'paused', 'cancelled', 'expired');
+CREATE TABLE public.profiles (id uuid PRIMARY KEY, full_name text);
+CREATE TABLE public.memberships (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, name text,
+  status membership_status NOT NULL DEFAULT 'active', ends_at timestamptz);
 SQL
 
 echo "== migrations"
 "${P[@]}" -f "$MIGRATIONS_DIR/0.sql" >/dev/null 2>&1
-"${P[@]}" -f "$MIGRATIONS_DIR/4.sql" 2>&1 | grep -v NOTICE || true
-"${P[@]}" -f "$MIGRATIONS_DIR/4.sql" 2>&1 | grep -v NOTICE || true   # re-run must succeed
+for f in 4 5 4 5; do   # re-run must succeed (and 4.sql then 5.sql again ends in the same state)
+  "${P[@]}" -f "$MIGRATIONS_DIR/$f.sql" 2>&1 | grep -v NOTICE || true
+done
 
 echo "== assertions"
 "${P[@]}" -f "$TESTS_DIR/booking-test.sql"
+"${P[@]}" -f "$TESTS_DIR/booking-guides-test.sql"
 
 echo "== concurrency: 30 parallel bookings on 3 slots"
 "${P[@]}" -c "INSERT INTO public.consultation_applications (token, name, email, phone)

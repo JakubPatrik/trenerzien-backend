@@ -1,4 +1,4 @@
--- Assertions for 4.sql (booking). Run by booking-test.sh on a throwaway local
+-- Assertions for 4.sql + 5.sql (booking). Run by booking-test.sh on a throwaway local
 -- Postgres — never against the real project. Any failed ASSERT aborts.
 \set ON_ERROR_STOP 1
 \set QUIET 1
@@ -51,7 +51,8 @@ BEGIN
     INTO n, lo, hi, local_minutes FROM public.booking_slots();
   ASSERT n > 0, 'no slots';
   ASSERT lo >= now() + interval '24 hours', 'min notice violated';
-  ASSERT hi <= now() + interval '21 days', 'horizon violated';
+  ASSERT (SELECT horizon_days FROM public.booking_settings) = 31, '5.sql should set horizon to 31 days';
+  ASSERT hi <= now() + interval '31 days', 'horizon violated';
   ASSERT local_minutes <@ ARRAY[540, 600, 660], format('unexpected local start times %s', local_minutes);
   ASSERT NOT EXISTS (SELECT 1 FROM public.booking_slots() WHERE ends_at - starts_at <> interval '60 minutes'), 'slot length';
 END $$;

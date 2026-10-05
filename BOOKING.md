@@ -9,7 +9,7 @@ Dve aplikácie, jeden Supabase projekt:
 | Aplikácia | Čo v nej žije |
 | --- | --- |
 | **WEB** (trenerzien.sk) | dotazník + výber termínu + potvrdenie — [WEB](#web--rezervácia-pohovoru) |
-| **KLUB** | sprievodkyne (`Sprievodkyňa klubu`) si v profile nastavujú dostupnosť — [KLUB](#klub--dostupnosť-sprievodkýň) |
+| **KLUB** | sprievodkyne (`Sprievodkyňa klubu`) si nastavujú dostupnosť na mesiac dopredu — [KLUB](#klub--dostupnosť-sprievodkýň) |
 
 ```
 krok 1 dotazník ──insert (s tokenom)──▶ consultation_applications
@@ -20,15 +20,15 @@ krok 2 výber    ──rpc booking_slots()──▶ voľné termíny (helper × 
                                          SmartEmailing         ── potvrdzovací e-mail
 helper / admin  ──POST cancel-meeting──▶ zmaže udalosť (Google pošle zrušenie), slot sa uvoľní
 
-KLUB sprievodkyňa ──rpc ensure_my_helper()──▶ helpers (vytvorí sa raz)
-                  ──CRUD──▶ helper_availability, helper_time_off ──▶ booking_slots() na WEBe
+memberships 'Sprievodkyňa klubu' ──trigger──▶ helpers (vytvorí / active)
+KLUB sprievodkyňa ──insert/delete slot (date)──▶ helper_availability ──▶ booking_slots() na WEBe
 ```
 
 | Čo | Kde |
 | --- | --- |
-| Schéma, RPC, RLS | `supabase/web/migrations/4.sql` (+ `5.sql` pre KLUB — zatiaľ neimplementované) |
+| Schéma, RPC, RLS | `supabase/web/migrations/4.sql` + `5.sql` (KLUB sprievodkyne, dátumová dostupnosť) |
 | Edge functions | `supabase/functions/book-meeting/`, `cancel-meeting/`, `_shared/` |
-| Skripty | `supabase/web/bin/08–12-*.sh` |
+| Skripty | `supabase/web/bin/08–12-*.sh`, `14-sync-guide-helpers.sh` |
 | Testy (lokálny Postgres) | `supabase/web/tests/booking-test.sh` |
 
 ## Dátový model
@@ -36,9 +36,9 @@ KLUB sprievodkyňa ──rpc ensure_my_helper()──▶ helpers (vytvorí sa ra
 | Tabuľka | Obsah |
 | --- | --- |
 | `helpers` | kto vedie pohovory; `user_id` → prihlásenie helpera, `email` → pozvánka |
-| `helper_availability` | týždenné okná, `day_of_week` ISO **1 = pondelok … 7 = nedeľa**, `timezone` (default `Europe/Bratislava`) |
+| `helper_availability` | `date` (konkrétny deň, KLUB) **alebo** týždenné `day_of_week` ISO **1 = pondelok … 7 = nedeľa**; `timezone` (default `Europe/Bratislava`) |
 | `helper_time_off` | dovolenka / voľno (`starts_at`–`ends_at`), blokuje sloty |
-| `booking_settings` | 1 riadok: `slot_minutes` 60, `slot_step_minutes` 60, `buffer_minutes` 0, `min_notice_minutes` 1440 (24 h), `horizon_days` 21 |
+| `booking_settings` | 1 riadok: `slot_minutes` 60, `slot_step_minutes` 60, `buffer_minutes` 0, `min_notice_minutes` 1440 (24 h), `horizon_days` 31 |
 | `appointments` | `pending → confirmed → completed / no_show`, alebo `cancelled` |
 
 Záruky v databáze:
@@ -49,6 +49,7 @@ Záruky v databáze:
 - **Čas sa overuje** v `book_appointment()` cez `booking_slots()`: mriežka,
   okno dostupnosti, voľno, buffer, min. predstih, horizont. Letný/zimný čas
   sedí (sloty sa generujú v lokálnom čase).
+- Dátumová dostupnosť len od dnes do dnes + `horizon_days`.
 - `pending` staršie ako 10 min (spadnutá edge function) sa automaticky uvoľní.
 - Neplatná časová zóna sa nedá uložiť.
 
@@ -122,27 +123,28 @@ Admin: správa `helpers` a `booking_settings`, prehľad `appointments` (dotazy a
 ## KLUB — dostupnosť sprievodkýň
 
 Sprievodkyne klubu vedú úvodné pohovory. Dostupnosť si nastavujú **samy v KLUBe**
-(profilové menu → **Moja dostupnosť**); WEB z nej cez `booking_slots()` ponúka termíny.
+(profilové menu → **Moja dostupnosť**, `/dostupnost`) **na najbližší mesiac, po
+jednotlivých hodinových slotoch**; WEB z nej cez `booking_slots()` ponúka termíny.
 
 **Kto:** používateľka s aktívnym členstvom `memberships.name = 'Sprievodkyňa klubu'`
 (`status = 'active'`, `ends_at` je `NULL` alebo v budúcnosti). Dnes 7 používateliek,
 manuálne, doživotné. Rola `leader` o tom **nerozhoduje** (časť lídriek nie sú
 sprievodkyne a naopak).
 
-### Backend doplnok — `supabase/web/migrations/5.sql` (⚠️ zatiaľ neimplementované)
+### Backend — `supabase/web/migrations/5.sql`
 
 | Čo | Správanie |
 | --- | --- |
-| `public.is_guide(_user_id uuid) → boolean` | `SECURITY DEFINER`; aktívne členstvo `Sprievodkyňa klubu` (rovnaká podmienka ako vyššie). |
-| `public.ensure_my_helper() → public.helpers` | `SECURITY DEFINER`, `EXECUTE` pre `authenticated`. Pre `auth.uid()`: nie je sprievodkyňa → `NULL`. Má riadok v `helpers` → vráti ho. Existuje helper s rovnakým e-mailom bez `user_id` (pridaný cez `10-add-helper.sh`) → prepojí ho. Inak vytvorí `helpers(user_id, name = profiles.full_name, email = auth.users.email, active = true)`. |
-| trigger na `memberships` | po INSERT/UPDATE/DELETE riadku `Sprievodkyňa klubu`: `helpers.active = is_guide(user_id)`. Keď členstvo skončí, sprievodkyňa sa prestane ponúkať (`booking_slots()` berie len `active`), jej dostupnosť ostane uložená. Dnešné členstvá sú doživotné; ak pribudnú časovo obmedzené, doplniť denný `pg_cron` sync. |
-| RLS | **bez zmeny** — existujúce politiky (`helpers.user_id = auth.uid()`) už sprievodkyni dovolia spravovať svoju dostupnosť a voľno, len čo má riadok v `helpers`. |
-| testy | doplniť do `supabase/web/tests/booking-test.sql`: nesprievodkyňa → `NULL`; sprievodkyňa → vytvorí raz (2. volanie vráti ten istý riadok); prepojenie podľa e-mailu; ukončené členstvo → `active = false` a zmizne z `booking_slots()`. |
+| `helper_availability.date` | Riadok má **buď** `date` (KLUB: jeden slot v konkrétny deň, Bratislava), **alebo** `day_of_week` (týždenné okno, `10-add-helper.sh`). Unikátne `(helper_id, date, start_time)`. Trigger: `date` len od dnes do dnes + `horizon_days`, inak `check_violation` „availability date … is outside …“. |
+| `booking_slots()` | ponúka sloty z oboch druhov riadkov; riadok 09:00–10:00 = presne jeden 60-min termín |
+| `is_guide(uuid)` | aktívne členstvo `Sprievodkyňa klubu` |
+| trigger `sync_guide_helper` na `memberships` | zmena členstva `Sprievodkyňa klubu` → `sync_guide_helper(user_id)`: sprievodkyňa bez riadku v `helpers` → vytvorí (`name` = `profiles.full_name`, `email` z `auth.users`; helpera s rovnakým e-mailom bez konta prepojí). Členstvo skončilo / zmazané → `active = false` (dostupnosť ostane, `booking_slots()` ju neponúka). Pri nasadení sa spustí pre dnešné sprievodkyne. Dnešné členstvá sú doživotné; ak pribudnú časovo obmedzené, doplniť denný `pg_cron`. |
+| `booking_settings.horizon_days` | 21 → **31** |
+| RLS | bez zmeny — sprievodkyňa číta svoj riadok v `helpers` a spravuje svoju `helper_availability` (`helpers.user_id = auth.uid()`). |
 
 ### KLUB frontend
 
-**1. Položka v profilovom menu** — zobraz len sprievodkyniam (vlastné členstvá
-si používateľka číta cez existujúce RLS):
+**1. Položka v profilovom menu** — len sprievodkyniam:
 
 ```ts
 const { count } = await supabase
@@ -158,58 +160,24 @@ const isGuide = (count ?? 0) > 0;
 **2. Stránka „Moja dostupnosť“** — pri otvorení:
 
 ```ts
-const { data: me } = await supabase.rpc("ensure_my_helper"); // { id, name, … } | null
-if (!me) return navigate("/profil");                            // nie je sprievodkyňa
-
-const { data: settings } = await supabase.from("booking_settings")
-  .select("slot_minutes, min_notice_minutes, horizon_days").single();
+const { data: helper } = await supabase.from("helpers").select("id").eq("user_id", user.id).maybeSingle();
+// null → „Účet sprievodkyne ešte nie je nastavený, napíš podpore.“
 ```
 
-Úvodný text: *„Nastav si, kedy máš čas na úvodné pohovory so záujemkyňami.
-Pohovor trvá {slot_minutes} min, záujemkyne si termín vyberajú najskôr
-{min_notice_minutes/60} h a najneskôr {horizon_days} dní vopred.“*
-
-**a) Týždenný rozvrh** — 7 riadkov **Po … Ne** (`day_of_week` 1 … 7), v každom
-zoznam okien „od – do“, tlačidlo **+ Pridať čas**, pri okne **×**. Časy po 30 min
-(select). Časová zóna je vždy `Europe/Bratislava` (default stĺpca — v UI ju nezobrazuj).
+Pás dátumov **zajtra … dnes + 30 dní**, pri výbere dňa hodinové sloty
+**07:00–21:00** ako prepínacie čipy (zapnutý = dostupná):
 
 ```ts
-await supabase.from("helper_availability").select("id, day_of_week, start_time, end_time")
-  .eq("helper_id", me.id).order("day_of_week").order("start_time");
-await supabase.from("helper_availability").insert({ helper_id: me.id, day_of_week, start_time: "09:00", end_time: "12:00" });
-await supabase.from("helper_availability").update({ start_time, end_time }).eq("id", rowId);
-await supabase.from("helper_availability").delete().eq("id", rowId);
+await supabase.from("helper_availability").select("id, date, start_time")
+  .eq("helper_id", helper.id).gte("date", tomorrow).lte("date", todayPlus30);
+await supabase.from("helper_availability")
+  .insert({ helper_id: helper.id, date: "2026-10-12", start_time: "09:00", end_time: "10:00" }); // zapnúť
+await supabase.from("helper_availability").delete().eq("id", rowId);                            // vypnúť
 ```
 
-Validácia vo fronte (DB stráži len `koniec > začiatok` a deň 1–7):
-- koniec musí byť po začiatku;
-- okno kratšie ako `slot_minutes` nevytvorí žiadny termín → upozorni
-  („Pohovor trvá 60 min, okno musí byť aspoň také dlhé.“);
-- okná v jeden deň sa nesmú prekrývať — prekrývajúce zlúč alebo odmietni.
-
-**b) Voľno / dovolenka** — zoznam budúcich blokov, pridanie „od dátumu – do
-dátumu (vrátane)“, zmazanie. Celé dni v čase Bratislavy: `starts_at` = 00:00 prvého
-dňa, `ends_at` = 00:00 dňa **po** poslednom dni.
-
-```ts
-await supabase.from("helper_time_off").select("id, starts_at, ends_at, note")
-  .eq("helper_id", me.id).gte("ends_at", new Date().toISOString()).order("starts_at");
-await supabase.from("helper_time_off").insert({ helper_id: me.id, starts_at, ends_at, note });
-await supabase.from("helper_time_off").delete().eq("id", rowId);
-```
-
-**c) Náhľad „Takto ťa uvidia záujemkyne“** — najbližších 7 dní z rovnakého RPC
-ako WEB (už zohľadňuje predstih, voľno aj obsadené termíny):
-
-```ts
-const { data } = await supabase.rpc("booking_slots", {
-  p_to: new Date(Date.now() + 7 * 864e5).toISOString(),
-});
-const mine = (data ?? []).filter((s) => s.helper_id === me.id);
-```
-
-Prázdny náhľad → *„Zatiaľ ti nikto nemôže rezervovať termín — pridaj si
-dostupnosť.“*
+`date` je lokálny dátum `YYYY-MM-DD`; `timezone` ani `day_of_week` neposielaj.
+Chyba `23505` (dvojklik) = slot už je zapnutý — ignoruj. Vypnutie slotu
+**neruší** už rezervovaný pohovor.
 
 **3. Neskôr (2. fáza, po nasadení Google):** „Moje pohovory“ na tej istej stránke —
 nadchádzajúce pohovory + dotazník leadky na prípravu, po pohovore
@@ -218,17 +186,19 @@ nadchádzajúce pohovory + dotazník leadky na prípravu, po pohovore
 ```ts
 await supabase.from("appointments")
   .select("id, starts_at, ends_at, status, meet_link, helper_note, application:consultation_applications(*)")
-  .eq("helper_id", me.id).in("status", ["confirmed", "completed", "no_show"]).order("starts_at");
+  .eq("helper_id", helper.id).in("status", ["confirmed", "completed", "no_show"]).order("starts_at");
 await supabase.from("appointments").update({ status: "completed", helper_note }).eq("id", id); // alebo "no_show"
 await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, reason } });
 ```
 
 ## Nasadenie
 
-1. **Migrácia:** `supabase/web/bin/08-apply-booking.sh`
-2. **Helperi:** sprievodkyne sa po `5.sql` pridajú samy pri prvom otvorení
-   „Moja dostupnosť“ v KLUBe. `10-add-helper.sh "Meno" email 1-5 09:00 12:00`
-   len pre helperov mimo klubu (prepojí účet s rovnakým e-mailom).
+1. **Migrácia:** `supabase/web/bin/08-apply-booking.sh` (4.sql + 5.sql)
+2. **Helperi:** sprievodkyne (`Sprievodkyňa klubu`) vzniknú automaticky z členstva
+   (5.sql ich pri nasadení doplní, potom trigger). Kontrola / oprava:
+   `14-sync-guide-helpers.sh`.
+   `10-add-helper.sh "Meno" email 1-5 09:00 12:00` len pre helperov mimo klubu
+   (týždenné okná; prepojí účet s rovnakým e-mailom).
 3. **Google** (master účet, v ktorého kalendári budú pohovory):
    - Google Cloud Console → zapni *Google Calendar API*.
    - OAuth consent screen: Workspace → *Internal*; Gmail → *External* a
@@ -269,9 +239,11 @@ where a.starts_at > now() and a.status = 'confirmed' order by a.starts_at;
 ## Testy
 
 `supabase/web/tests/booking-test.sh` — lokálny dočasný Postgres (nie Supabase):
-migrácia 2× (re-runnable), sloty, letný čas, všetky odmietnutia, constraint,
+migrácie 4→5→4→5 (re-runnable), sloty, letný čas, všetky odmietnutia, constraint,
 voľno, buffer, expirácia `pending`, RLS pre anon / helpera / cudzieho / admina
-a 30 súbežných rezervácií (presne 2 na slot, bez deadlockov).
+a 30 súbežných rezervácií (presne 2 na slot, bez deadlockov). `booking-guides-test.sql`:
+členstvo → helper (raz, prepojenie e-mailom, deaktivácia), dátumové sloty
+(RLS, duplicita, rozsah dátumu), rezervácia dátumového slotu.
 
 ## Ďalej (nie je súčasťou)
 
