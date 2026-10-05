@@ -215,8 +215,9 @@ await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, 
   `appointments.email_error` = `lead: …` / `helper: …` (oddelené ` | `).
 - **Zrušenie** (`cancel-meeting`) zatiaľ posiela Google — zrušenie dostanú všetci hostia
   vrátane leada a helpera.
-- **Šablóny:** `book-meeting/email.ts` (spoločný layout, `leadEmail` / `helperEmail`),
-  `book-meeting/ics.ts`. Webové fonty (Bebas Neue, Playfair Display, Inter) zobrazí
+- **Šablóny:** `book-meeting/email.ts` (`leadEmail` / `helperEmail`), `book-meeting/ics.ts`;
+  spoločný layout (hlavička, pätička, tlačidlo) v `_shared/email-layout.ts` — používajú ho aj
+  pozvánky do klubu ([INVITATIONS.md](INVITATIONS.md)). Webové fonty (Bebas Neue, Playfair Display, Inter) zobrazí
   Apple Mail / iOS, Gmail použije záložné (Arial Narrow / Impact, Georgia, Arial).
 - **Náhľad** (nič neposiela, vyrenderuje oba e-maily so vzorovými dátami a otvorí v prehliadači;
   zapíše aj `.txt` a `.ics`):

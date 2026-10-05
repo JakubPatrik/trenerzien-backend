@@ -11,6 +11,7 @@
 #                 GOOGLE_CALENDAR_ID (optional, default "primary")
 # Browser access: BOOKING_ALLOWED_ORIGINS (comma-separated; unset = any origin)
 # Google invite:  BOOKING_OWNER_EMAIL (only address Google emails; default pohovory@trenerzien.sk)
+# KLUB emails:    CLUB_PUBLIC_URL (links in notify-emails; default https://klub.trenerzien.sk)
 # SmartEmailing:  SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY,
 #                 SMARTEMAILING_SENDER_EMAIL, SMARTEMAILING_SENDER_NAME,
 #                 SMARTEMAILING_REPLY_TO (sender + reply-to must be confirmed in SmartEmailing)
@@ -20,7 +21,7 @@ source ./00-config.sh
 
 NAMES=(
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN GOOGLE_CALENDAR_ID
-  BOOKING_ALLOWED_ORIGINS BOOKING_OWNER_EMAIL
+  BOOKING_ALLOWED_ORIGINS BOOKING_OWNER_EMAIL CLUB_PUBLIC_URL
   SMARTEMAILING_USERNAME SMARTEMAILING_API_KEY SMARTEMAILING_SENDER_EMAIL
   SMARTEMAILING_SENDER_NAME SMARTEMAILING_REPLY_TO
 )

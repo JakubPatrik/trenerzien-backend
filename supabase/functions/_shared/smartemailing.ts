@@ -15,6 +15,7 @@ export type Email = {
   html: string;
   text: string;
   tag: string;
+  senderName?: string; // overrides SMARTEMAILING_SENDER_NAME
   attachments?: Attachment[];
 };
 
@@ -47,7 +48,7 @@ export async function sendEmail(email: Email): Promise<string | null> {
       sender_credentials: {
         from,
         reply_to: Deno.env.get("SMARTEMAILING_REPLY_TO") || from,
-        sender_name: Deno.env.get("SMARTEMAILING_SENDER_NAME") || "Tréner ŽIEN",
+        sender_name: email.senderName || Deno.env.get("SMARTEMAILING_SENDER_NAME") || "Tréner ŽIEN",
       },
       tag: email.tag,
       message_contents: { subject: email.subject, html_body: email.html, text_body: email.text },
