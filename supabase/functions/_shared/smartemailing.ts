@@ -15,7 +15,18 @@ export type Email = {
   html: string;
   text: string;
   tag: string;
+  attachments?: Attachment[];
 };
+
+export type Attachment = {
+  fileName: string;
+  contentType: string;
+  content: string; // UTF-8 text, base64-encoded on send
+};
+
+function base64(s: string): string {
+  return btoa(Array.from(new TextEncoder().encode(s), (b) => String.fromCharCode(b)).join(""));
+}
 
 // Returns the SmartEmailing message id.
 export async function sendEmail(email: Email): Promise<string | null> {
@@ -40,7 +51,16 @@ export async function sendEmail(email: Email): Promise<string | null> {
       },
       tag: email.tag,
       message_contents: { subject: email.subject, html_body: email.html, text_body: email.text },
-      tasks: [{ recipient: { emailaddress: email.to } }],
+      // SmartEmailing requires `replace` on every task, even when empty (422 otherwise).
+      tasks: [{
+        recipient: { emailaddress: email.to },
+        replace: [],
+        attachments: (email.attachments ?? []).map((a) => ({
+          file_name: a.fileName,
+          content_type: a.contentType,
+          data_base64: base64(a.content),
+        })),
+      }],
     }),
   });
 

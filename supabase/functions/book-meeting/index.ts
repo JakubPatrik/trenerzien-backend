@@ -7,19 +7,25 @@
 // token is the authorization.
 //
 // Flow: book_appointment() reserves the slot atomically ('pending', the DB
-// refuses double bookings) → Google Calendar event with Meet link → appointment
-// 'confirmed' + booking_* columns on the application → SmartEmailing
-// confirmation (failure is logged on the appointment, never fails the booking).
+// refuses double bookings) → Google Calendar event with Meet link (Google emails
+// the invite only to the owner; lead + helper are added silently) → appointment
+// 'confirmed' + booking_* columns on the application → SmartEmailing emails with
+// pozvanka.ics to the lead and the helper (failures are logged on the
+// appointment, never fail the booking).
 //
 // Secrets: GOOGLE_* (see _shared/google-calendar.ts), SMARTEMAILING_* (see
 // _shared/smartemailing.ts), BOOKING_ALLOWED_ORIGINS (see _shared/http.ts),
+// BOOKING_OWNER_EMAIL (optional, default pohovory@trenerzien.sk),
 // SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (built in).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { json, preflight } from "../_shared/http.ts";
-import { createMeeting, deleteMeeting } from "../_shared/google-calendar.ts";
+import { createMeeting, deleteMeeting, type Meeting } from "../_shared/google-calendar.ts";
 import { NotConfiguredError, sendEmail } from "../_shared/smartemailing.ts";
-import { confirmationEmail } from "./email.ts";
+import { type BookingData, helperEmail, leadEmail } from "./email.ts";
+
+// Gets Google's own invite for every booking.
+const OWNER_EMAIL = Deno.env.get("BOOKING_OWNER_EMAIL") || "pohovory@trenerzien.sk";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -119,21 +125,27 @@ Deno.serve(async (req) => {
   const timeZone = settings?.timezone ?? "Europe/Bratislava";
 
   // 2. Google Calendar event + Meet link. On failure release the slot.
-  let meeting: { eventId: string; meetLink: string };
+  let meeting: Meeting;
+  const lead = appointment.application;
   try {
     meeting = await createMeeting({
       appointmentId: appointment.id,
-      summary: `Pohovor: ${appointment.application.name} × ${appointment.helper.name}`,
+      summary: `Pohovor: ${lead.name} × ${appointment.helper.name}`,
       description: [
         "Pohovor Tréner ŽIEN.",
         "",
-        "Rezervácia termínu je záväzná. Ak sa nemôžeš dostaviť, napíš na podpora@trenerzien.sk aspoň 1 deň vopred.",
+        `Klientka: ${lead.name}`,
+        `E-mail: ${lead.email}`,
+        ...(lead.phone ? [`Telefón: ${lead.phone}`] : []),
+        "",
+        "Rezervácia termínu je záväzná.",
       ].join("\n"),
       start: appointment.starts_at,
       end: appointment.ends_at,
       timeZone,
-      attendees: [
-        { email: appointment.application.email, displayName: appointment.application.name },
+      notify: [{ email: OWNER_EMAIL }],
+      silent: [
+        { email: lead.email, displayName: lead.name },
         { email: appointment.helper.email, displayName: appointment.helper.name },
       ],
     });
@@ -170,26 +182,36 @@ Deno.serve(async (req) => {
   }).eq("id", appointment.application.id);
   if (appError) console.error(`[book] application ${appointment.application.id} update failed: ${appError.message}`);
 
-  // 4. Confirmation email — best effort.
-  try {
-    const id = await sendEmail(confirmationEmail({
-      to: appointment.application.email,
-      leadName: appointment.application.name,
-      helperName: appointment.helper.name,
-      start: new Date(appointment.starts_at),
-      end: new Date(appointment.ends_at),
-      timeZone,
-      meetLink: meeting.meetLink,
-    }));
-    await supabase.from("appointments")
-      .update({ confirmation_email_sent_at: new Date().toISOString(), email_error: null })
-      .eq("id", appointment.id);
-    console.log(`[email] ${appointment.id} confirmation sent (${id ?? "?"})`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    (err instanceof NotConfiguredError ? console.warn : console.error)(`[email] ${appointment.id}: ${message}`);
-    await supabase.from("appointments").update({ email_error: message.slice(0, 1000) }).eq("id", appointment.id);
+  // 4. Emails to the lead and the helper — best effort. confirmation_email_sent_at
+  // tracks the lead's email; any failure (lead or helper) goes to email_error.
+  const data: BookingData = {
+    eventId: meeting.eventId,
+    organizerEmail: meeting.organizerEmail,
+    start: new Date(appointment.starts_at),
+    end: new Date(appointment.ends_at),
+    timeZone,
+    meetLink: meeting.meetLink,
+    lead: { name: lead.name, email: lead.email, phone: lead.phone },
+    helper: appointment.helper,
+  };
+  const [leadResult, helperResult] = await Promise.allSettled([
+    sendEmail(leadEmail(data)),
+    sendEmail(helperEmail(data)),
+  ]);
+  const errors: string[] = [];
+  for (const [who, r] of [["lead", leadResult], ["helper", helperResult]] as const) {
+    if (r.status === "fulfilled") {
+      console.log(`[email] ${appointment.id} ${who} email sent (${r.value ?? "?"})`);
+      continue;
+    }
+    const message = r.reason instanceof Error ? r.reason.message : String(r.reason);
+    (r.reason instanceof NotConfiguredError ? console.warn : console.error)(`[email] ${appointment.id} ${who}: ${message}`);
+    errors.push(`${who}: ${message}`);
   }
+  await supabase.from("appointments").update({
+    ...(leadResult.status === "fulfilled" ? { confirmation_email_sent_at: new Date().toISOString() } : {}),
+    email_error: errors.length ? errors.join(" | ").slice(0, 1000) : null,
+  }).eq("id", appointment.id);
 
   console.log(`[book] ${appointment.id} confirmed`);
   return json(req, 200, { appointment: publicView(appointment) });

@@ -83,12 +83,20 @@ export type NewMeeting = {
   start: string; // ISO
   end: string; // ISO
   timeZone: string;
-  attendees: { email: string; displayName?: string }[];
+  notify: Attendee[]; // Google emails them the invite
+  silent: Attendee[]; // guests (Meet access, calendar entry) without any Google email
 };
 
-// Creates the event with a Google Meet link; Google emails the invite to the
-// attendees (sendUpdates=all). Returns the event id + Meet link.
-export async function createMeeting(m: NewMeeting): Promise<{ eventId: string; meetLink: string }> {
+type Attendee = { email: string; displayName?: string };
+
+// Creates the event with a Google Meet link. Google emails the invite only to
+// `notify` (created with sendUpdates=all); `silent` guests are added afterwards
+// with sendUpdates=none — they get our own SmartEmailing confirmation + .ics.
+// Note: the calendar's own account is the organizer and never gets an invite email.
+// Returns the event id, Meet link and the organizer (the calendar's account).
+export type Meeting = { eventId: string; meetLink: string; organizerEmail: string | null };
+
+export async function createMeeting(m: NewMeeting): Promise<Meeting> {
   const eventId = eventIdFor(m.appointmentId);
   const res = await call("POST", calendarUrl("", { conferenceDataVersion: "1", sendUpdates: "all" }), {
     id: eventId,
@@ -96,7 +104,7 @@ export async function createMeeting(m: NewMeeting): Promise<{ eventId: string; m
     description: m.description,
     start: { dateTime: m.start, timeZone: m.timeZone },
     end: { dateTime: m.end, timeZone: m.timeZone },
-    attendees: m.attendees,
+    attendees: m.notify,
     guestsCanInviteOthers: false,
     reminders: { useDefault: true },
     extendedProperties: { private: { appointment_id: m.appointmentId } },
@@ -130,7 +138,24 @@ export async function createMeeting(m: NewMeeting): Promise<{ eventId: string; m
       event.conferenceData?.createRequest?.status?.statusCode ?? "?"
     })`);
   }
-  return { eventId, meetLink };
+
+  // Add the silent guests (merged, so a retry after 409 is a no-op).
+  // deno-lint-ignore no-explicit-any
+  const current: any[] = event.attendees ?? [];
+  const known = new Set(current.map((a) => String(a.email).toLowerCase()));
+  const added = m.silent.filter((a) => !known.has(a.email.toLowerCase()));
+  if (added.length) {
+    const patched = await call("PATCH", calendarUrl(`/${eventId}`, { sendUpdates: "none" }), {
+      attendees: [...current, ...added],
+    });
+    if (!patched.ok) {
+      await deleteMeeting(eventId).catch(() => {});
+      await fail(patched, "adding guests");
+    }
+    await patched.body?.cancel();
+  }
+
+  return { eventId, meetLink, organizerEmail: event.organizer?.email ?? null };
 }
 
 // Deletes the event and emails the cancellation to attendees. Already-deleted

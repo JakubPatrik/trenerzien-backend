@@ -1,8 +1,9 @@
 # Rezervácia pohovoru — backend
 
 Krok 2 po dotazníku (`consultation_applications`): lead si vyberie termín
-(60 min) a s kým sa porozpráva; vznikne Google Meet v kalendári master účtu,
-pozvánka ide leadovi aj helperovi a lead dostane potvrdenie zo SmartEmailingu.
+(60 min) a s kým sa porozpráva; vznikne Google Meet v kalendári master účtu.
+Google pošle pozvánku len vlastníkovi (`pohovory@trenerzien.sk`); lead aj helper
+dostanú vlastný e-mail zo SmartEmailingu s pozvánkou `.ics` — viď [E-maily](#e-maily).
 
 Dve aplikácie, jeden Supabase projekt:
 
@@ -15,9 +16,9 @@ Dve aplikácie, jeden Supabase projekt:
 krok 1 dotazník ──insert (s tokenom)──▶ consultation_applications
 krok 2 výber    ──rpc booking_slots()──▶ voľné termíny (helper × čas)
        potvrdiť ──POST book-meeting────▶ book_appointment()  ── 'pending' (DB zamkne slot)
-                                         Google Calendar       ── udalosť + Meet link, pozvánky
+                                         Google Calendar       ── udalosť + Meet link, pozvánka len vlastníkovi
                                          appointments          ── 'confirmed'
-                                         SmartEmailing         ── potvrdzovací e-mail
+                                         SmartEmailing         ── e-mail + .ics leadovi a helperovi
 helper / admin  ──POST cancel-meeting──▶ zmaže udalosť (Google pošle zrušenie), slot sa uvoľní
 
 memberships 'Sprievodkyňa klubu' ──trigger──▶ helpers (vytvorí / active)
@@ -191,6 +192,39 @@ await supabase.from("appointments").update({ status: "completed", helper_note })
 await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, reason } });
 ```
 
+## E-maily
+
+| Kto | Čo dostane | Odkiaľ |
+| --- | --- | --- |
+| vlastník (`BOOKING_OWNER_EMAIL`, default `pohovory@trenerzien.sk`) | štandardná Google pozvánka (v popise kontakt na leada) | Google Calendar |
+| lead | „Tešíme sa na *teba.*“ — dátum, čas, s kým, tlačidlo Meet, záväznosť účasti | SmartEmailing, tag `booking-confirmation` |
+| helper | „Máš nový *pohovor.*“ — dátum, čas, meno / e-mail / telefón leada, tlačidlo Meet | SmartEmailing, tag `booking-helper` |
+
+- **Google:** udalosť sa vytvorí len s vlastníkom (`sendUpdates=all`), po vzniku
+  Meet linku sa lead a helper doplnia ako hostia bez e-mailu (`sendUpdates=none`).
+  Ostávajú hosťami → do Meetu vojdú bez „klopania“. Ak sa ich nepodarí doplniť,
+  udalosť sa zmaže a slot uvoľní. Pozor: ak je `pohovory@` zároveň master účet
+  (organizátor), Google mu e-mail nepošle — udalosť má len v kalendári.
+- **Pozvánka `pozvanka.ics`** (príloha oboch e-mailov): `METHOD:REQUEST`, organizátor
+  = master účet, hosť = príjemca → Gmail / Outlook / Apple Mail zobrazia natívnu
+  kartu udalosti (Áno / Nie / Pridať do kalendára). `UID` = iCalUID Google udalosti
+  (`<event id>@google.com`), takže prijatie v Google Kalendári sa spáruje s existujúcou
+  udalosťou a nevznikne duplikát. RSVP odpoveď ide master účtu.
+- **Chyby:** e-maily sa posielajú paralelne a nikdy nezhodia rezerváciu.
+  `appointments.confirmation_email_sent_at` = e-mail leadovi odišiel;
+  `appointments.email_error` = `lead: …` / `helper: …` (oddelené ` | `).
+- **Zrušenie** (`cancel-meeting`) zatiaľ posiela Google — zrušenie dostanú všetci hostia
+  vrátane leada a helpera.
+- **Šablóny:** `book-meeting/email.ts` (spoločný layout, `leadEmail` / `helperEmail`),
+  `book-meeting/ics.ts`. Webové fonty (Bebas Neue, Playfair Display, Inter) zobrazí
+  Apple Mail / iOS, Gmail použije záložné (Arial Narrow / Impact, Georgia, Arial).
+- **Náhľad** (nič neposiela, vyrenderuje oba e-maily so vzorovými dátami a otvorí v prehliadači;
+  zapíše aj `.txt` a `.ics`):
+
+  ```bash
+  npx -y deno run -A supabase/functions/book-meeting/preview.ts [výstupný-priečinok]
+  ```
+
 ## Nasadenie
 
 1. **Migrácia:** `supabase/web/bin/08-apply-booking.sh` (4.sql + 5.sql)
@@ -207,6 +241,7 @@ await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, 
    - `GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… ./11-google-refresh-token.sh`
      → prihlás sa ako master účet → vypíše `GOOGLE_REFRESH_TOKEN`.
 4. **Secrets:** `GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… GOOGLE_REFRESH_TOKEN=… BOOKING_ALLOWED_ORIGINS=https://trenerzien.sk,https://www.trenerzien.sk ./12-set-booking-secrets.sh`
+   (voliteľne `BOOKING_OWNER_EMAIL=…`, default `pohovory@trenerzien.sk`)
 5. **SmartEmailing** (keď budú prístupy): `SMARTEMAILING_USERNAME=… SMARTEMAILING_API_KEY=… SMARTEMAILING_SENDER_EMAIL=… SMARTEMAILING_REPLY_TO=podpora@trenerzien.sk ./12-set-booking-secrets.sh`
    — odosielateľ aj reply-to musia byť v SmartEmailingu overené. Bez nich
    rezervácia funguje, len sa nepošle e-mail (`appointments.email_error`).
@@ -219,7 +254,8 @@ curl -i -X POST https://<ref>.supabase.co/functions/v1/book-meeting -d '{}'   # 
 ```
 
 Potom testovací dotazník → rezervácia → skontroluj udalosť v kalendári,
-pozvánky, e-mail a `appointments`. Zruš cez `cancel-meeting` → udalosť zmizne,
+Google pozvánku u vlastníka, e-mail leadovi aj helperovi (karta udalosti v Gmaile)
+a `appointments` (`confirmation_email_sent_at`, `email_error`). Zruš cez `cancel-meeting` → udalosť zmizne,
 slot je znova v `booking_slots()`.
 
 ## Prevádzka
@@ -248,6 +284,7 @@ a 30 súbežných rezervácií (presne 2 na slot, bez deadlockov). `booking-guid
 ## Ďalej (nie je súčasťou)
 
 - Pripomienka 24 h vopred (pg_cron + pg_net → SmartEmailing).
+- Vlastný e-mail o zrušení cez SmartEmailing (`METHOD:CANCEL` .ics) namiesto Google.
 - Zrušenie / presun leadom cez odkaz s tokenom (zatiaľ e-mailom na podporu).
 - Kontrola obsadenosti v osobných kalendároch helperov (Google freeBusy).
 - Ochrana formulára pred botmi (Cloudflare Turnstile) pri raste návštevnosti.

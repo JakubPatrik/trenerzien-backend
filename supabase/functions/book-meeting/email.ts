@@ -1,102 +1,224 @@
-// Confirmation email (Slovak), styled like the booking page.
+// Booking emails (Slovak) sent via SmartEmailing — one to the lead, one to the
+// helper — styled like the booking page's confirmation step. Each carries the
+// calendar invite as pozvanka.ics (METHOD:REQUEST, so mail clients show their
+// native event card). Google emails only the owner (see book-meeting/index.ts).
+// Preview locally: deno run -A supabase/functions/book-meeting/preview.ts
 
 import type { Email } from "../_shared/smartemailing.ts";
+import { buildIcs } from "./ics.ts";
 
 const RED = "#B8292F";
+const INK = "#0B0B0D";
+const MUTED = "#6B6B6B";
+const LINE = "#E2E2E2";
 const SUPPORT_EMAIL = "podpora@trenerzien.sk";
+
+// Web fonts where the client supports them (Apple Mail, iOS), safe fallbacks elsewhere (Gmail).
+const FONT_DISPLAY = "'Bebas Neue','Oswald','Arial Narrow',Impact,sans-serif";
+const FONT_SERIF = "'Playfair Display',Georgia,'Times New Roman',serif";
+const FONT_MONO = "'JetBrains Mono','Courier New',monospace";
+const FONT_SANS = "Inter,Arial,Helvetica,sans-serif";
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-// "utorok 6. októbra, 9:00–10:00"
-export function formatSlot(start: Date, end: Date, timeZone: string): string {
+// { day: "Utorok 6. októbra", time: "10:00–11:00" }
+export function formatSlot(start: Date, end: Date, timeZone: string): { day: string; time: string } {
   const day = new Intl.DateTimeFormat("sk-SK", { timeZone, weekday: "long", day: "numeric", month: "long" })
-    .format(start);
+    .format(start).replace(/,/g, "");
   const time = new Intl.DateTimeFormat("sk-SK", { timeZone, hour: "numeric", minute: "2-digit" });
-  return `${day}, ${time.format(start)}–${time.format(end)}`;
+  return { day: day.charAt(0).toUpperCase() + day.slice(1), time: `${time.format(start)}–${time.format(end)}` };
 }
 
-export type ConfirmationData = {
-  to: string;
-  leadName: string;
-  helperName: string;
+export type BookingData = {
+  eventId: string; // Google event id
+  organizerEmail: string | null; // Google calendar account; the invite's ORGANIZER
   start: Date;
   end: Date;
   timeZone: string;
   meetLink: string;
+  lead: { name: string; email: string; phone: string };
+  helper: { name: string; email: string };
 };
 
-export function confirmationEmail(d: ConfirmationData): Email {
-  const firstName = d.leadName.trim().split(/\s+/)[0] || d.leadName;
-  const when = formatSlot(d.start, d.end, d.timeZone);
-  const minutes = Math.round((d.end.getTime() - d.start.getTime()) / 60000);
-  const e = escapeHtml;
+const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
-  const row = (label: string, value: string) => `
-    <tr><td style="padding:16px 20px;border:1px solid #E5E5E5;">
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;color:#0B0B0D;">${label}</div>
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#444;padding-top:4px;">${value}</div>
-    </td></tr>
-    <tr><td style="height:12px;line-height:12px;font-size:0;">&nbsp;</td></tr>`;
+type Layout = {
+  title: string;
+  eyebrow: string;
+  headline: string; // HTML: plain words, then the italic accent word
+  accent: string;
+  intro: string; // HTML
+  rows: [label: string, value: string][]; // HTML values
+  note: string; // HTML
+  button: string;
+  meetLink: string;
+  year: number;
+};
 
-  const html = `<!doctype html>
-<html lang="sk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+function layout(l: Layout): string {
+  const row = ([label, value]: [string, string], i: number) => {
+    const border = i < l.rows.length - 1 ? `border-bottom:1px solid ${LINE};` : "";
+    return `
+          <tr>
+            <td style="padding:18px 20px;${border}font-family:${FONT_SANS};font-size:16px;color:${MUTED};">${label}</td>
+            <td align="right" style="padding:18px 20px;${border}font-family:${FONT_SANS};font-size:16px;font-weight:600;color:${INK};">${value}</td>
+          </tr>`;
+  };
+
+  return `<!doctype html>
+<html lang="sk"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600&family=JetBrains+Mono&family=Playfair+Display:ital@1&display=swap" rel="stylesheet">
+<title>${l.title}</title>
+</head>
 <body style="margin:0;padding:0;background:#F2F2F2;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F2F2F2;"><tr><td align="center" style="padding:24px 12px;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;">
-    <tr><td style="background:#0B0B0D;padding:20px 28px;font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:bold;letter-spacing:1px;color:#FFFFFF;">
-      TRÉNER <span style="color:${RED};">ŽIEN</span>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:8px;overflow:hidden;">
+    <tr><td align="center" style="background:${INK};padding:18px 32px;font-family:${FONT_SANS};font-size:22px;font-weight:600;letter-spacing:-0.3px;color:#FFFFFF;">
+      tréner <span style="color:${RED};">ŽIEN</span>
     </td></tr>
-    <tr><td style="padding:32px 28px 8px;">
-      <div style="font-family:'Courier New',monospace;font-size:12px;letter-spacing:4px;color:${RED};text-transform:uppercase;">Rezervácia pohovoru · ${minutes} min</div>
-      <h1 style="margin:16px 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:30px;line-height:1.1;color:#0B0B0D;text-transform:uppercase;">Termín je <span style="font-family:Georgia,serif;font-style:italic;text-transform:none;color:${RED};">potvrdený.</span></h1>
-      <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;color:#444;">Ahoj ${e(firstName)}, tešíme sa na náš rozhovor.</p>
+    <tr><td style="padding:36px 32px 0;">
+      <div style="font-family:${FONT_MONO};font-size:12px;letter-spacing:4px;text-transform:uppercase;color:${RED};">${l.eyebrow}</div>
+      <h1 style="margin:14px 0 0;font-family:${FONT_DISPLAY};font-size:44px;line-height:1;font-weight:normal;text-transform:uppercase;color:${INK};">${l.headline} <span style="font-family:${FONT_SERIF};font-style:italic;text-transform:none;color:${RED};">${l.accent}</span></h1>
+      <p style="margin:16px 0 0;font-family:${FONT_SANS};font-size:16px;line-height:1.5;color:#444;">${l.intro}</p>
     </td></tr>
-    <tr><td style="padding:0 28px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-        ${row("Dátum a čas", e(when))}
-        ${row("S kým sa porozprávaš", e(d.helperName))}
+    <tr><td style="padding:28px 32px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${LINE};border-collapse:separate;">
+        ${l.rows.map(row).join("")}
       </table>
     </td></tr>
-    <tr><td style="padding:12px 28px 8px;">
-      <a href="${e(d.meetLink)}" style="display:block;background:${RED};color:#FFFFFF;text-align:center;padding:16px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;text-decoration:none;">Pripojiť sa cez Google Meet &rarr;</a>
-      <p style="margin:8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#777;text-align:center;">${e(d.meetLink)}</p>
+    <tr><td style="padding:24px 32px 0;">
+      <a href="${escapeHtml(l.meetLink)}" style="display:block;background:${RED};color:#FFFFFF;text-align:center;padding:17px;font-family:${FONT_SANS};font-size:17px;font-weight:600;text-decoration:none;">${l.button}</a>
     </td></tr>
-    <tr><td style="padding:20px 28px 32px;">
-      <div style="border-left:3px solid ${RED};padding:4px 0 4px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#444;">
-        Rezervácia termínu je záväzná a účasť na pohovore je vyžadovaná. Ak sa nemôžeš dostaviť, napíš nám na
-        <a href="mailto:${SUPPORT_EMAIL}" style="color:#0B0B0D;font-weight:bold;">${SUPPORT_EMAIL}</a> aspoň 1 deň vopred.
+    <tr><td style="padding:24px 32px 36px;">
+      <div style="border-left:3px solid ${RED};padding:2px 0 2px 16px;font-family:${FONT_SANS};font-size:15px;line-height:1.55;color:#444;">
+        ${l.note}
       </div>
-      <p style="margin:16px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#777;">Pozvánku s odkazom nájdeš aj v Google kalendári.</p>
     </td></tr>
-    <tr><td style="background:#0B0B0D;padding:16px 28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9A9A9A;">
-      © ${d.start.getFullYear()} Tréner ŽIEN · <a href="https://trenerzien.sk" style="color:#9A9A9A;">trenerzien.sk</a>
+    <tr><td align="center" style="background:${INK};padding:20px 32px;font-family:${FONT_SANS};font-size:14px;color:#9A9A9A;">
+      © ${l.year} Tréner ŽIEN · Mgr. Daniel Čmel.
     </td></tr>
   </table>
 </td></tr></table>
 </body></html>`;
+}
+
+const link = (href: string, label: string) =>
+  `<a href="${escapeHtml(href)}" style="color:${INK};font-weight:600;">${escapeHtml(label)}</a>`;
+
+function invite(d: BookingData, to: { email: string; name: string }, summary: string, details: string[]) {
+  return {
+    fileName: "pozvanka.ics",
+    contentType: "text/calendar",
+    content: buildIcs({
+      // Google's iCalUID for the event, so accepting in Google Calendar matches the existing event.
+      uid: `${d.eventId}@google.com`,
+      start: d.start,
+      end: d.end,
+      summary,
+      description: [`Google Meet: ${d.meetLink}`, "", ...details].join("\n"),
+      url: d.meetLink,
+      organizer: { email: d.organizerEmail ?? SUPPORT_EMAIL, name: "Tréner ŽIEN" },
+      attendee: to,
+    }),
+  };
+}
+
+// To the lead (client).
+export function leadEmail(d: BookingData): Email {
+  const { day, time } = formatSlot(d.start, d.end, d.timeZone);
+  const e = escapeHtml;
+  const html = layout({
+    title: "Termín je potvrdený",
+    eyebrow: "Termín je potvrdený",
+    headline: "Tešíme sa na",
+    accent: "teba.",
+    intro: `Ahoj ${e(firstName(d.lead.name))}, tvoj pohovor je rezervovaný.`,
+    rows: [["Dátum", e(day)], ["Čas", e(time)], ["S kým", e(d.helper.name)]],
+    note: "K hovoru sa pripojíš v dohodnutom čase kliknutím na červené tlačidlo. Účasť je záväzná. Tešíme sa!",
+    button: "Pripojiť sa k hovoru",
+    meetLink: d.meetLink,
+    year: d.start.getFullYear(),
+  });
 
   const text = [
-    `Ahoj ${firstName},`,
+    `Ahoj ${firstName(d.lead.name)},`,
     "",
-    "tvoj pohovor je potvrdený.",
+    "tvoj pohovor je potvrdený. Tešíme sa na teba.",
     "",
-    `Dátum a čas: ${when}`,
-    `S kým sa porozprávaš: ${d.helperName}`,
-    `Google Meet: ${d.meetLink}`,
+    `Dátum: ${day}`,
+    `Čas: ${time}`,
+    `S kým: ${d.helper.name}`,
     "",
-    "Rezervácia termínu je záväzná a účasť na pohovore je vyžadovaná.",
-    `Ak sa nemôžeš dostaviť, napíš nám na ${SUPPORT_EMAIL} aspoň 1 deň vopred.`,
+    `K hovoru sa pripojíš v dohodnutom čase cez tento odkaz: ${d.meetLink}`,
+    "Účasť je záväzná. Tešíme sa!",
     "",
-    "Tréner ŽIEN — trenerzien.sk",
+    "Tréner ŽIEN · Mgr. Daniel Čmel",
   ].join("\n");
 
   return {
-    to: d.to,
-    subject: `Pohovor potvrdený: ${when}`,
+    to: d.lead.email,
+    subject: `Pohovor potvrdený: ${day}, ${time}`,
     html,
     text,
     tag: "booking-confirmation",
+    attachments: [
+      invite(d, { email: d.lead.email, name: d.lead.name }, `Pohovor Tréner ŽIEN × ${d.helper.name}`, [
+        "Účasť je záväzná. Tešíme sa!",
+      ]),
+    ],
+  };
+}
+
+// To the helper who runs the call.
+export function helperEmail(d: BookingData): Email {
+  const { day, time } = formatSlot(d.start, d.end, d.timeZone);
+  const e = escapeHtml;
+  const rows: [string, string][] = [
+    ["Dátum", e(day)],
+    ["Čas", e(time)],
+    ["Klientka", e(d.lead.name)],
+    ["E-mail", link(`mailto:${d.lead.email}`, d.lead.email)],
+  ];
+  if (d.lead.phone) rows.push(["Telefón", link(`tel:${d.lead.phone.replace(/\s+/g, "")}`, d.lead.phone)]);
+
+  const html = layout({
+    title: "Nový pohovor",
+    eyebrow: "Nový pohovor",
+    headline: "Máš nový",
+    accent: "pohovor.",
+    intro: `Ahoj ${e(firstName(d.helper.name))}, ${e(firstName(d.lead.name))} si rezervovala termín s tebou.`,
+    rows,
+    note: "Pred pohovorom sa prosím telefonicky spoj s klientkou a potvrď si rezerváciu.",
+    button: "Pripojiť sa na pohovor",
+    meetLink: d.meetLink,
+    year: d.start.getFullYear(),
+  });
+
+  const contact = [`Klientka: ${d.lead.name}`, `E-mail: ${d.lead.email}`, ...(d.lead.phone ? [`Telefón: ${d.lead.phone}`] : [])];
+  const text = [
+    `Ahoj ${firstName(d.helper.name)},`,
+    "",
+    "máš nový pohovor.",
+    "",
+    `Dátum: ${day}`,
+    `Čas: ${time}`,
+    ...contact,
+    `Pripojiť sa na pohovor: ${d.meetLink}`,
+    "",
+    "Pred pohovorom sa prosím telefonicky spoj s klientkou a potvrď si rezerváciu.",
+    "",
+    "Tréner ŽIEN · Mgr. Daniel Čmel",
+  ].join("\n");
+
+  return {
+    to: d.helper.email,
+    subject: `Nový pohovor: ${d.lead.name}, ${day}, ${time}`,
+    html,
+    text,
+    tag: "booking-helper",
+    attachments: [invite(d, { email: d.helper.email, name: d.helper.name }, `Pohovor: ${d.lead.name}`, contact)],
   };
 }
