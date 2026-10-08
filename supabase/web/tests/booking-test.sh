@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Test 4.sql + 5.sql (booking, KLUB guides) on a throwaway LOCAL Postgres — never touches Supabase.
+# Test 4.sql + 5.sql + 6.sql (booking, KLUB guides → personalistky) on a throwaway LOCAL Postgres — never touches Supabase.
 # Needs Postgres binaries (brew install postgresql@17). Steps:
 #   1. temp cluster + minimal Supabase stand-ins (roles, auth.users, auth.uid(), has_role)
 #   2. 0.sql (consultation_applications) + 4.sql, 5.sql twice (must be re-runnable)
 #   3. booking-test.sql + booking-guides-test.sql assertions
+#   3b. 6.sql twice + booking-recruiters-test.sql (personalistky take over from guides)
 #   4. 30 concurrent bookings on 3 slots → exactly 2 per slot (2 helpers), no deadlocks
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -24,18 +25,24 @@ CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service
 CREATE SCHEMA extensions; CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
 CREATE SCHEMA auth;
 CREATE TABLE auth.users (id uuid PRIMARY KEY, email text);
+CREATE TABLE auth.identities (user_id uuid, identity_data jsonb);
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
   AS $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 GRANT USAGE ON SCHEMA auth, public, extensions TO anon, authenticated, service_role;
-CREATE TYPE app_role AS ENUM ('admin', 'user');
+CREATE TYPE app_role AS ENUM ('admin', 'user', 'leader');
 CREATE TABLE public.user_roles (user_id uuid, role app_role, UNIQUE (user_id, role));
+ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own roles" ON public.user_roles FOR SELECT TO authenticated USING (auth.uid() = user_id);
+GRANT SELECT, INSERT, DELETE ON public.user_roles TO authenticated;
 CREATE FUNCTION public.has_role(_user_id uuid, _role app_role) RETURNS boolean
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
   AS $$ SELECT EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id AND role = _role) $$;
+CREATE POLICY "Admins can view all roles" ON public.user_roles FOR SELECT TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'::app_role));
 CREATE TYPE membership_status AS ENUM ('active', 'paused', 'cancelled', 'expired');
-CREATE TABLE public.profiles (id uuid PRIMARY KEY, full_name text);
+CREATE TABLE public.profiles (id uuid PRIMARY KEY, full_name text, founder_at timestamptz, membership_ends_on date);
 CREATE TABLE public.memberships (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, name text,
-  status membership_status NOT NULL DEFAULT 'active', ends_at timestamptz);
+  status membership_status NOT NULL DEFAULT 'active', ends_at timestamptz, source text);
 SQL
 
 echo "== migrations"
@@ -47,6 +54,10 @@ done
 echo "== assertions"
 "${P[@]}" -f "$TESTS_DIR/booking-test.sql"
 "${P[@]}" -f "$TESTS_DIR/booking-guides-test.sql"
+for f in 6 6; do
+  "${P[@]}" -f "$MIGRATIONS_DIR/$f.sql" 2>&1 | grep -v NOTICE || true
+done
+"${P[@]}" -f "$TESTS_DIR/booking-recruiters-test.sql"
 
 echo "== concurrency: 30 parallel bookings on 3 slots"
 "${P[@]}" -c "INSERT INTO public.consultation_applications (token, name, email, phone)

@@ -27,5 +27,7 @@ The sync finished: all 65 memberships are linked, none is still "lifetime", and 
 - [x] **End-to-end booking test:** questionnaire → book → calendar event, invitations and confirmation email all arrived.
 - [ ] **Test cancelling** through `cancel-meeting`: the event disappears, Google emails the cancellation, and the slot is back in `booking_slots()`.
 - [ ] **Guides fill in their availability** for the next month.
-- [ ] **Later:** if time-limited guide memberships appear, add a daily `pg_cron` run of `sync_guide_helper()`, because the trigger can't see an `ends_at` passing.
+- [x] **Personalistka role (`6.sql`) applied to production** (`17`). Only recruiters (role `personalistka`) lead interviews; all 8 guide helpers are now inactive.
+- [ ] **Add the recruiters:** `18-recruiter.sh add <email>`. Until then the WEB offers no interview slots.
+- [ ] **KLUB frontend (Lovable):** `supabase/klub/KLUB_LOVABLE_PERSONALISTKA.md`.
 - [ ] **Phase 2:** mark meetings as completed or no-show in KLUB, reminder emails, self-service cancellation for leads, busy check against helpers' own calendars.

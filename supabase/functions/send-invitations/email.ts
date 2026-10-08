@@ -4,7 +4,7 @@
 import { escapeHtml, layout, link } from "../_shared/email-layout.ts";
 import type { Email } from "../_shared/smartemailing.ts";
 
-export const SENDER_NAME = "KLUB trénera ŽIEN";
+export const SENDER_NAME = "KLUB O DEKÁDU MLADŠIA";
 
 export function inviteEmail(d: { to: string; fullName: string; inviteUrl: string }): Email {
   const name = d.fullName.trim();
