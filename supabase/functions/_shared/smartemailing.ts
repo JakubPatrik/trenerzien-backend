@@ -15,6 +15,7 @@ export type Email = {
   html: string;
   text: string;
   tag: string;
+  senderEmail?: string; // overrides SMARTEMAILING_SENDER_EMAIL and SMARTEMAILING_REPLY_TO (must be confirmed)
   senderName?: string; // overrides SMARTEMAILING_SENDER_NAME
   attachments?: Attachment[];
 };
@@ -33,7 +34,7 @@ function base64(s: string): string {
 export async function sendEmail(email: Email): Promise<string | null> {
   const username = Deno.env.get("SMARTEMAILING_USERNAME");
   const apiKey = Deno.env.get("SMARTEMAILING_API_KEY");
-  const from = Deno.env.get("SMARTEMAILING_SENDER_EMAIL");
+  const from = email.senderEmail || Deno.env.get("SMARTEMAILING_SENDER_EMAIL");
   if (!username || !apiKey || !from) {
     throw new NotConfiguredError("SmartEmailing credentials not configured");
   }
@@ -47,7 +48,7 @@ export async function sendEmail(email: Email): Promise<string | null> {
     body: JSON.stringify({
       sender_credentials: {
         from,
-        reply_to: Deno.env.get("SMARTEMAILING_REPLY_TO") || from,
+        reply_to: email.senderEmail || Deno.env.get("SMARTEMAILING_REPLY_TO") || from,
         sender_name: email.senderName || Deno.env.get("SMARTEMAILING_SENDER_NAME") || "Tréner ŽIEN",
       },
       tag: email.tag,

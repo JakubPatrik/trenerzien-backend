@@ -198,6 +198,10 @@ await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, 
 | lead | „Tešíme sa na *teba.*“ — dátum, čas, s kým, tlačidlo Meet, záväznosť účasti | SmartEmailing, tag `booking-confirmation` |
 | helper | „Máš nový *pohovor.*“ — dátum, čas, meno / e-mail / telefón leada, tlačidlo Meet | SmartEmailing, tag `booking-helper` |
 
+Oba SmartEmailing e-maily odchádzajú z `pohovory@trenerzien.sk` (odosielateľ aj
+reply-to, natvrdo v `book-meeting/email.ts`), nie zo `SMARTEMAILING_SENDER_EMAIL`
+— `pohovory@` musí byť v SmartEmailingu potvrdený odosielateľ.
+
 - **Google:** udalosť sa vytvorí len s vlastníkom (`sendUpdates=all`), po vzniku
   Meet linku sa lead a helper doplnia ako hostia bez e-mailu (`sendUpdates=none`).
   Ostávajú hosťami → do Meetu vojdú bez „klopania“. Ak sa ich nepodarí doplniť,

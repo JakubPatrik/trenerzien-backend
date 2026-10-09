@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Deploy application-submitted to the vyzva project: after the questionnaire it
-# emails the team ("Nová prihláška") and imports the lead into SmartEmailing list 609.
+# imports the lead into SmartEmailing list 609 (no email is sent).
 # JWT verification is off: the public page calls it with the application token.
-# Needs `supabase login` first; uses the existing SMARTEMAILING_* secrets
-# (12-set-booking-secrets.sh) — the team email goes to SMARTEMAILING_REPLY_TO
-# (fallback SMARTEMAILING_SENDER_EMAIL).
+# Needs `supabase login` first; uses the existing SMARTEMAILING_USERNAME /
+# SMARTEMAILING_API_KEY secrets (12-set-booking-secrets.sh).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./00-config.sh

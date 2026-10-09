@@ -10,22 +10,27 @@
 // refuses double bookings) → Google Calendar event with Meet link (Google emails
 // the invite only to the owner; lead + helper are added silently) → appointment
 // 'confirmed' + booking_* columns on the application → SmartEmailing emails with
-// pozvanka.ics to the lead and the helper (failures are logged on the
-// appointment, never fail the booking).
+// pozvanka.ics to the lead and the helper, a summary to the owner, and the lead
+// imported into SmartEmailing list 615 (failures are logged on the appointment,
+// never fail the booking).
 //
 // Secrets: GOOGLE_* (see _shared/google-calendar.ts), SMARTEMAILING_* (see
 // _shared/smartemailing.ts), BOOKING_ALLOWED_ORIGINS (see _shared/http.ts),
-// BOOKING_OWNER_EMAIL (optional, default pohovory@trenerzien.sk),
+// BOOKING_OWNER_EMAIL (optional, default pohovory@trenerzien.sk; gets Google's
+// invite and the owner email),
 // SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (built in).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { json, preflight } from "../_shared/http.ts";
 import { createMeeting, deleteMeeting, type Meeting } from "../_shared/google-calendar.ts";
-import { NotConfiguredError, sendEmail } from "../_shared/smartemailing.ts";
-import { type BookingData, helperEmail, leadEmail } from "./email.ts";
+import { importContact, NotConfiguredError, sendEmail } from "../_shared/smartemailing.ts";
+import { ANSWER_COLUMNS, type Answers } from "../_shared/application.ts";
+import { type BookingData, helperEmail, leadEmail, ownerEmail } from "./email.ts";
 
-// Gets Google's own invite for every booking.
+// Gets Google's own invite and the owner email for every booking.
 const OWNER_EMAIL = Deno.env.get("BOOKING_OWNER_EMAIL") || "pohovory@trenerzien.sk";
+// SmartEmailing list of leads who booked a call (the questionnaire puts them on 609).
+const BOOKED_LIST_ID = 615;
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -58,11 +63,11 @@ type Appointment = {
   status: string;
   meet_link: string | null;
   helper: { name: string; email: string };
-  application: { id: string; name: string; email: string; phone: string };
+  application: Answers & { id: string; name: string; email: string; phone: string };
 };
 
 const APPOINTMENT_SELECT =
-  "id, starts_at, ends_at, status, meet_link, helper:helpers(name, email), application:consultation_applications(id, name, email, phone)";
+  `id, starts_at, ends_at, status, meet_link, helper:helpers(name, email), application:consultation_applications(id, name, email, phone, ${ANSWER_COLUMNS})`;
 
 function publicView(a: Appointment) {
   return {
@@ -182,8 +187,9 @@ Deno.serve(async (req) => {
   }).eq("id", appointment.application.id);
   if (appError) console.error(`[book] application ${appointment.application.id} update failed: ${appError.message}`);
 
-  // 4. Emails to the lead and the helper — best effort. confirmation_email_sent_at
-  // tracks the lead's email; any failure (lead or helper) goes to email_error.
+  // 4. Emails to the lead, the helper and the owner + the lead on list 615 — best
+  // effort. confirmation_email_sent_at tracks the lead's email; any failure goes
+  // to email_error.
   const data: BookingData = {
     eventId: meeting.eventId,
     organizerEmail: meeting.organizerEmail,
@@ -191,21 +197,30 @@ Deno.serve(async (req) => {
     end: new Date(appointment.ends_at),
     timeZone,
     meetLink: meeting.meetLink,
-    lead: { name: lead.name, email: lead.email, phone: lead.phone },
+    lead: { name: lead.name, email: lead.email, phone: lead.phone, answers: lead },
     helper: appointment.helper,
   };
-  const [leadResult, helperResult] = await Promise.allSettled([
+  const [leadResult, helperResult, ownerResult, listResult] = await Promise.allSettled([
     sendEmail(leadEmail(data)),
     sendEmail(helperEmail(data)),
+    sendEmail(ownerEmail(data, OWNER_EMAIL)),
+    importContact({ email: lead.email, name: lead.name, phone: lead.phone }, [BOOKED_LIST_ID]),
   ]);
   const errors: string[] = [];
-  for (const [who, r] of [["lead", leadResult], ["helper", helperResult]] as const) {
+  for (
+    const [who, r] of [
+      ["lead", leadResult],
+      ["helper", helperResult],
+      ["owner", ownerResult],
+      [`list ${BOOKED_LIST_ID}`, listResult],
+    ] as const
+  ) {
     if (r.status === "fulfilled") {
-      console.log(`[email] ${appointment.id} ${who} email sent (${r.value ?? "?"})`);
+      console.log(`[smartemailing] ${appointment.id} ${who} ok${r.value ? ` (${r.value})` : ""}`);
       continue;
     }
     const message = r.reason instanceof Error ? r.reason.message : String(r.reason);
-    (r.reason instanceof NotConfiguredError ? console.warn : console.error)(`[email] ${appointment.id} ${who}: ${message}`);
+    (r.reason instanceof NotConfiguredError ? console.warn : console.error)(`[smartemailing] ${appointment.id} ${who}: ${message}`);
     errors.push(`${who}: ${message}`);
   }
   await supabase.from("appointments").update({

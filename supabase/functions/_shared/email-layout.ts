@@ -1,7 +1,7 @@
-// Shared HTML layout for our SmartEmailing emails (booking, invitations, applications):
+// Shared HTML layout for our SmartEmailing emails (booking, invitations):
 // black header with the wordmark, eyebrow + headline with an italic accent word,
-// optional detail table, optional stacked answers (question above, free text below),
-// red button, note with a red left border, black footer.
+// optional detail table(s) joined by a "— text —" divider, red button, optional stacked answers (question above, free
+// text below), note with a red left border, black footer.
 
 export const RED = "#B8292F";
 export const INK = "#0B0B0D";
@@ -30,39 +30,53 @@ export type Layout = {
   accent: string;
   intro: string; // HTML
   rows?: [label: string, value: string][]; // HTML values
+  moreRows?: { divider: string; rows: [label: string, value: string][] }; // second table under a divider
   answers?: [question: string, answer: string][]; // HTML answers; long free text, stacked
+  answersTitle?: string; // heading above the answers
   button: { label: string; href: string };
   note: string; // HTML
   year: number;
 };
 
 export function layout(l: Layout): string {
-  const rows = l.rows ?? [];
-  const row = ([label, value]: [string, string], i: number) => {
-    const border = i < rows.length - 1 ? `border-bottom:1px solid ${LINE};` : "";
+  const row = (count: number) => ([label, value]: [string, string], i: number) => {
+    const border = i < count - 1 ? `border-bottom:1px solid ${LINE};` : "";
     return `
           <tr>
             <td style="padding:18px 20px;${border}font-family:${FONT_SANS};font-size:16px;color:${MUTED};">${label}</td>
             <td align="right" style="padding:18px 20px;${border}font-family:${FONT_SANS};font-size:16px;font-weight:600;color:${INK};">${value}</td>
           </tr>`;
   };
-  const table = rows.length
-    ? `
-    <tr><td style="padding:28px 32px 0;">
+  const card = (rows: [string, string][], top: string) => `
+    <tr><td style="padding:${top} 32px 0;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${LINE};border-collapse:separate;">
-        ${rows.map(row).join("")}
+        ${rows.map(row(rows.length)).join("")}
       </table>
-    </td></tr>`
-    : "";
+    </td></tr>`;
+  const line = `<td width="50%" style="vertical-align:middle;"><div style="border-top:1px solid ${LINE};font-size:0;line-height:0;">&nbsp;</div></td>`;
+  const divider = (text: string) => `
+    <tr><td style="padding:18px 32px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        ${line}
+        <td style="padding:0 14px;white-space:nowrap;font-family:${FONT_MONO};font-size:12px;letter-spacing:3px;text-transform:uppercase;color:${RED};">${text}</td>
+        ${line}
+      </tr></table>
+    </td></tr>`;
+  const table = (l.rows?.length ? card(l.rows, "28px") : "") +
+    (l.moreRows?.rows.length ? divider(l.moreRows.divider) + card(l.moreRows.rows, "18px") : "");
   const answers = l.answers ?? [];
   const answer = ([question, text]: [string, string], i: number) => `
         <div style="padding:${i ? "18px" : "0"} 0 18px;${i ? `border-top:1px solid ${LINE};` : ""}">
           <div style="font-family:${FONT_MONO};font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${MUTED};">${question}</div>
           <div style="margin-top:8px;font-family:${FONT_SANS};font-size:16px;line-height:1.5;color:${INK};">${text}</div>
         </div>`;
+  const answersTitle = l.answersTitle
+    ? `
+        <div style="margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid ${INK};font-family:${FONT_MONO};font-size:12px;letter-spacing:4px;text-transform:uppercase;color:${RED};">${l.answersTitle}</div>`
+    : "";
   const answerBlock = answers.length
     ? `
-    <tr><td style="padding:28px 32px 0;">${answers.map(answer).join("")}
+    <tr><td style="padding:${l.answersTitle ? "36px" : "28px"} 32px 0;">${answersTitle}${answers.map(answer).join("")}
     </td></tr>`
     : "";
 
@@ -82,10 +96,10 @@ export function layout(l: Layout): string {
       <div style="font-family:${FONT_MONO};font-size:12px;letter-spacing:4px;text-transform:uppercase;color:${RED};">${l.eyebrow}</div>
       <h1 style="margin:14px 0 0;font-family:${FONT_DISPLAY};font-size:44px;line-height:1;font-weight:normal;text-transform:uppercase;color:${INK};">${l.headline} <span style="font-family:${FONT_SERIF};font-style:italic;text-transform:none;color:${RED};">${l.accent}</span></h1>
       <p style="margin:16px 0 0;font-family:${FONT_SANS};font-size:16px;line-height:1.5;color:#444;">${l.intro}</p>
-    </td></tr>${table}${answerBlock}
+    </td></tr>${table}
     <tr><td style="padding:24px 32px 0;">
       <a href="${escapeHtml(l.button.href)}" style="display:block;background:${RED};color:#FFFFFF;text-align:center;padding:17px;font-family:${FONT_SANS};font-size:17px;font-weight:600;text-decoration:none;">${l.button.label}</a>
-    </td></tr>
+    </td></tr>${answerBlock}
     <tr><td style="padding:24px 32px 36px;">
       <div style="border-left:3px solid ${RED};padding:2px 0 2px 16px;font-family:${FONT_SANS};font-size:15px;line-height:1.55;color:#444;">
         ${l.note}
