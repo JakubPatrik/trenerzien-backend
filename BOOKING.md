@@ -141,8 +141,8 @@ personalistky). Rola sa kombinuje s ostatnými — písmenká pri mene RL / Z / 
 | `is_recruiter(uuid)` | rola `personalistka` |
 | trigger `sync_recruiter_helper` na `user_roles` | pridanie / odobratie roly `personalistka` → `sync_recruiter_helper(user_id)`: bez riadku v `helpers` → vytvorí (`name` = `profiles.full_name`, `email` z `auth.users`; helpera s rovnakým e-mailom bez konta prepojí). Rola odobratá → `active = false` (dostupnosť ostane, `booking_slots()` ju neponúka). Nahrádza trigger na členstve `Sprievodkyňa klubu` z 5.sql; pri nasadení 6.sql sa helperi sprievodkýň bez roly deaktivujú. |
 | `is_helper()` | len **aktívny** helper — deaktivovaná sprievodkyňa nezapíše dostupnosť ani cez API |
-| `is_club_member()` | rola `personalistka` dáva prístup do KLUBu (ako `leader`) |
-| `member_badges()` | `(user_id, badges text[])`, písmenká v poradí `RL` (`leader`), `Z` (`founder_at`), `S` (`is_guide()`), `P` (`personalistka`); len prihlásení, len ženy s aspoň jedným |
+| `is_club_member()` | rola `personalistka` dáva prístup do KLUBu (ako `lider`) |
+| `member_badges()` | `(user_id, badges text[])`, písmenká v poradí `RL` (`lider`), `Z` (`founder_at`), `S` (`is_guide()`), `P` (`personalistka`); len prihlásení, len ženy s aspoň jedným |
 | RLS `user_roles` | admin smie vložiť / zmazať **len** rolu `personalistka` |
 | `booking_settings.horizon_days` | **31** |
 

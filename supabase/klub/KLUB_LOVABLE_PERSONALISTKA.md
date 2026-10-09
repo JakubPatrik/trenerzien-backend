@@ -9,7 +9,7 @@ hodnosti a dajú sa kombinovať, jedna žena môže mať aj všetky:
 
 | Písmenko | Význam | Odkiaľ sa berie |
 | --- | --- | --- |
-| **RL** | Legionárna líderka | rola `leader` |
+| **RL** | Legionárna líderka | rola `lider` |
 | **Z** | Zakladateľka | `profiles.founder_at` |
 | **S** | Sprievodkyňa | aktívne členstvo `Sprievodkyňa klubu` |
 | **P** | Personalistka | rola `personalistka` (**nová**) |
@@ -22,7 +22,7 @@ nevytváraj.
 ## 0. Čo je nové v databáze (len na čítanie, nič nevytváraj)
 
 - Enum `app_role` má novú hodnotu **`'personalistka'`**. Uloží sa ako riadok v
-  `user_roles` (rovnako ako `leader`), **nie** ako členstvo v `memberships`.
+  `user_roles` (rovnako ako `lider`), **nie** ako členstvo v `memberships`.
 - RPC **`is_recruiter(_user_id uuid) → boolean`** vráti, či je používateľka personalistka.
 - RPC **`member_badges() → table(user_id uuid, badges text[])`** vráti písmenká
   pre všetky ženy, ktoré majú aspoň jedno. Poradie je vždy `RL`, `Z`, `S`, `P`.
@@ -115,7 +115,7 @@ await supabase.from("user_roles").delete().eq("user_id", memberId).eq("role", "p
   aktivuje účet na pohovory. Po odobratí roly sa deaktivuje. Jej uložená
   dostupnosť ostane, len sa na webe prestane ponúkať. Už rezervované pohovory
   sa nerušia.
-- Iné roly (admin, leader) cez tento prepínač **neponúkaj**. Databáza by ich
+- Iné roly (admin, lider) cez tento prepínač **neponúkaj**. Databáza by ich
   zmenu aj tak odmietla.
 
 ---

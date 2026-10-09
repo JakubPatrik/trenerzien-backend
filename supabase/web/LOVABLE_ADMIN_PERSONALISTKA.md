@@ -84,7 +84,7 @@ druhý prepínač.
 
 - Nevkladaj ani nemaž riadky v `user_roles` priamo. Používaj len `add_recruiter` /
   `remove_recruiter`.
-- Neponúkaj touto akciou iné roly (admin, leader).
+- Neponúkaj touto akciou iné roly (admin, lider).
 - Nezakladaj nový účet, ak e-mail neexistuje. Účty vznikajú cez Stripe alebo pozvánku.
 - Nevolaj RPC so service-role kľúčom ani z edge function. Volá sa s reláciou prihláseného admina.
 
