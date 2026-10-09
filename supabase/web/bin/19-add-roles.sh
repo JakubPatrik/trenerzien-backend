@@ -6,7 +6,7 @@
 #
 #   ./19-add-roles.sh gloriaondicova@gmail.com admin personalistka
 #
-# Roles: admin, user, leader, personalistka (app_role enum).
+# Roles: admin, user, lider, personalistka, sprievodkyna (app_role enum).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./00-config.sh
