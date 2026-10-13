@@ -73,16 +73,12 @@ export async function sendEmail(email: Email): Promise<string | null> {
   return body.data?.[0]?.id ?? null;
 }
 
-// Adds or updates a contact and puts it on the given contact lists (POST /import).
-export async function importContact(
-  contact: { email: string; name?: string; phone?: string },
-  listIds: number[],
-): Promise<void> {
+// POST /import with one contact (fields not sent are left untouched).
+async function importOne(contact: Record<string, unknown>): Promise<void> {
   const username = Deno.env.get("SMARTEMAILING_USERNAME");
   const apiKey = Deno.env.get("SMARTEMAILING_API_KEY");
   if (!username || !apiKey) throw new NotConfiguredError("SmartEmailing credentials not configured");
 
-  const [first, ...rest] = (contact.name ?? "").trim().split(/\s+/);
   const res = await fetch("https://app.smartemailing.cz/api/v3/import", {
     method: "POST",
     headers: {
@@ -91,13 +87,7 @@ export async function importContact(
     },
     body: JSON.stringify({
       settings: { update: true, add_namedays: false, add_genders: false },
-      data: [{
-        emailaddress: contact.email,
-        ...(first ? { name: first } : {}),
-        ...(rest.length ? { surname: rest.join(" ") } : {}),
-        ...(contact.phone ? { cellphone: contact.phone } : {}),
-        contactlists: listIds.map((id) => ({ id, status: "confirmed" })),
-      }],
+      data: [contact],
     }),
   });
 
@@ -105,4 +95,27 @@ export async function importContact(
   if (!res.ok || body.status === "error") {
     throw new Error(`SmartEmailing import failed (${res.status}): ${body.message ?? JSON.stringify(body).slice(0, 300)}`);
   }
+}
+
+// Adds or updates a contact and puts it on the given contact lists (POST /import).
+export async function importContact(
+  contact: { email: string; name?: string; phone?: string },
+  listIds: number[],
+): Promise<void> {
+  const [first, ...rest] = (contact.name ?? "").trim().split(/\s+/);
+  await importOne({
+    emailaddress: contact.email,
+    ...(first ? { name: first } : {}),
+    ...(rest.length ? { surname: rest.join(" ") } : {}),
+    ...(contact.phone ? { cellphone: contact.phone } : {}),
+    contactlists: listIds.map((id) => ({ id, status: "confirmed" })),
+  });
+}
+
+// Takes a contact off the given contact lists; the contact itself stays.
+export async function removeFromContactlists(email: string, listIds: number[]): Promise<void> {
+  await importOne({
+    emailaddress: email,
+    contactlists: listIds.map((id) => ({ id, status: "removed" })),
+  });
 }
