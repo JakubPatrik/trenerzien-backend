@@ -6,26 +6,30 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import type { StripeObject } from "../_shared/stripe.ts";
 import { findOrCreateUser } from "../_shared/users.ts";
 
-type Plan = { name: string };
+type Plan = { name: string; contactlistId: number };
+
+// SmartEmailing lists "… členstvo - KLUB ODM - aktívne členky":
+// 624 mesačné, 618 3M, 621 ročné. Left when access is revoked.
+export const KLUB_CONTACTLISTS = [624, 618, 621];
 
 // Routed by Stripe price lookup_key (same in test and live).
 // Names must match public.is_club_member() — it grants KLUB access by name.
 const PLANS: Record<string, Plan> = {
   // Founder prices (live, 49 €/month, 497 €/year) — names of the imported klub rows.
-  zk_klub_mesacne_clenstvo: { name: "Zakladateľské členstvo — mesačné" },
-  zk_klub_rocne_clenstvo: { name: "Zakladateľské členstvo — ročné" },
-  zk_klub_mesacne: { name: "Zakladateľské členstvo — mesačné" }, // same offer, older price
-  zk_klub_rocne: { name: "Zakladateľské členstvo — ročné" },
-  klub_mesacne_clenstvo: { name: "Členstvo — mesačné" },
-  klub_stvrtrocne_clenstvo: { name: "Členstvo — štvrťročné" },
-  klub_rocne_clenstvo: { name: "Členstvo — ročné" },
+  zk_klub_mesacne_clenstvo: { name: "Zakladateľské členstvo — mesačné", contactlistId: 624 },
+  zk_klub_rocne_clenstvo: { name: "Zakladateľské členstvo — ročné", contactlistId: 621 },
+  zk_klub_mesacne: { name: "Zakladateľské členstvo — mesačné", contactlistId: 624 }, // same offer, older price
+  zk_klub_rocne: { name: "Zakladateľské členstvo — ročné", contactlistId: 621 },
+  klub_mesacne_clenstvo: { name: "Členstvo — mesačné", contactlistId: 624 },
+  klub_stvrtrocne_clenstvo: { name: "Členstvo — štvrťročné", contactlistId: 618 },
+  klub_rocne_clenstvo: { name: "Členstvo — ročné", contactlistId: 621 },
 };
 
 type MembershipStatus = "active" | "paused" | "ended";
 
 export type SyncResult =
   | { action: "skipped"; reason: string }
-  | { action: "synced"; status: MembershipStatus; ends_at: string; user_id: string };
+  | { action: "synced"; status: MembershipStatus; ends_at: string; user_id: string; contactlist_id: number };
 
 function isoFromUnix(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
@@ -119,5 +123,5 @@ export async function syncSubscription(supabase: SupabaseClient, sub: StripeObje
   );
   if (error) throw new Error(`memberships upsert failed: ${error.message}`);
 
-  return { action: "synced", ...state, user_id: userId };
+  return { action: "synced", ...state, user_id: userId, contactlist_id: plan.contactlistId };
 }

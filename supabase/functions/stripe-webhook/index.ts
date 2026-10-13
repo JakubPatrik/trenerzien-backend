@@ -7,19 +7,24 @@
 // Secrets:
 //   STRIPE_WEBHOOK_SECRET_TEST / _LIVE        whsec_… of THIS endpoint
 //   STRIPE_SECRET_KEY_TEST / _LIVE            restricted key, Subscriptions + Customers: read
+//   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   built in
 //
 // Every handled event is reduced to a subscription id; the subscription is
 // re-fetched from Stripe and its current state written to memberships (see
 // membership.ts). That makes processing idempotent and order-independent.
+// On invoice.paid (first payment and every renewal) the customer is also put
+// on the plan's SmartEmailing contact list; when access is revoked (membership
+// no longer active), they're taken off all KLUB lists.
 //
 // Responses: 400 for a bad request/signature, 500 when not configured or when
 // processing fails (the stripe_events row is removed, so Stripe's automatic
 // retries — and "Resend" — process it again). Everything else 200.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { importContact, removeFromContactlists } from "../_shared/smartemailing.ts";
 import { type Env, type StripeObject, stripeGet, verifyStripeSignature } from "../_shared/stripe.ts";
-import { syncSubscription } from "./membership.ts";
+import { KLUB_CONTACTLISTS, syncSubscription } from "./membership.ts";
 
 const SUBSCRIPTION_EVENTS = new Set([
   "customer.subscription.created",
@@ -129,6 +134,22 @@ Deno.serve(async (req) => {
     } else {
       console.log(`[sync] ${subscriptionId} → ${result.status} until ${result.ends_at} (user ${result.user_id})`);
     }
+
+    // A failure throws → 500, Stripe retries; the sync above is idempotent.
+    const customer = sub.customer;
+    if (result.action === "synced" && customer?.email) {
+      if (result.status !== "active") {
+        await removeFromContactlists(customer.email, KLUB_CONTACTLISTS);
+        console.log(`[smartemailing] ${customer.email} removed from lists ${KLUB_CONTACTLISTS.join(",")}`);
+      } else if (event.type === "invoice.paid") {
+        await importContact(
+          { email: customer.email, name: customer.name ?? undefined, phone: customer.phone ?? undefined },
+          [result.contactlist_id],
+        );
+        console.log(`[smartemailing] ${customer.email} → list ${result.contactlist_id}`);
+      }
+    }
+
     return json(200, { received: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
