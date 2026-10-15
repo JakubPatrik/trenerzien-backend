@@ -9,23 +9,17 @@
 //            → { ok: true, inviteUrl } | { ok: false, error }
 // Deployed with --no-verify-jwt; the caller's token + admin role are verified here.
 //
-// Per recipient: auth.admin.generateLink({ type: "recovery" }) → hashed_token →
-// <site>/nove-heslo?t=<hashed_token> → our own email via SmartEmailing
-// (transactional, one recipient per request) → profiles.invitation = 'invited'.
-// The link carries the hashed token, never action_link: mail scanners open links
-// and would consume /auth/v1/verify. /nove-heslo verifies only on submit
-// (verifyOtp({ token_hash, type: "recovery" })). Each generateLink invalidates the
-// member's previous link. Link validity (7 days) = Supabase Auth email OTP expiry.
+// Per recipient: sendInvite (_shared/invitations.ts — link + email via
+// SmartEmailing) → profiles.invitation = 'invited'. Each new link invalidates
+// the member's previous one.
 //
 // Secrets: SMARTEMAILING_* (see _shared/smartemailing.ts); SUPABASE_URL,
 // SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY (built in).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { json as jsonFor, preflight } from "../_shared/http.ts";
-import { sendEmail } from "../_shared/smartemailing.ts";
-import { inviteEmail } from "./email.ts";
+import { PUBLIC_SITE_URL, sendInvite } from "../_shared/invitations.ts";
 
-const PUBLIC_SITE_URL = "https://klub.trenerzien.sk";
 const MAX_PER_CALL = 500;
 const CONCURRENCY = 12;
 const ID_CHUNK = 300; // .in() list length (URL limit)
@@ -81,7 +75,7 @@ Deno.serve(async (req) => {
   }
 
   // The app sends siteUrl (window.location.origin), but links always point to
-  // production — never to a preview / localhost origin.
+  // production.
   const site = PUBLIC_SITE_URL;
   console.log(`[invite] ${body.mode} by ${user.email ?? user.id}`);
   return body.mode === "batch" ? await batch(req, body, site) : await single(req, body, site);
@@ -119,7 +113,7 @@ async function batch(req: Request, body: any, site: string): Promise<Response> {
         if (!u?.user?.email) return; // no auth account / no email → skip silently
         email = u.user.email.toLowerCase();
         if (only && !only.has(email)) return;
-        const result = await invite(email, p.full_name, site);
+        const result = await sendInvite(admin, email, p.full_name, site);
         if (result.ok) sentIds.push(p.id);
         else failed.push({ email, error: result.error });
       } catch (err) {
@@ -213,47 +207,12 @@ async function single(req: Request, body: any, site: string): Promise<Response> 
   if (!email.includes("@")) return json(req, 400, { ok: false, error: "Neplatný e-mail." });
   const markAsInvited = body.markInvited !== false;
 
-  const result = await invite(email, null, site, true);
-  if (!result.ok) return json(req, 200, { ok: false, error: result.error });
+  const result = await sendInvite(admin, email, null, site);
+  if (!result.ok) return json(req, 200, { ok: false, error: result.notFound ? NOT_FOUND : result.error });
 
   if (markAsInvited) await markInvited([result.userId]);
   console.log(`[invite] single ${email}${markAsInvited ? "" : " (test, not marked)"}`);
   return json(req, 200, { ok: true, inviteUrl: result.inviteUrl });
-}
-
-// ── one recipient ────────────────────────────────────────────────────────────
-
-type InviteResult = { ok: true; userId: string; inviteUrl: string } | { ok: false; error: string };
-
-// fullName null → read from profiles (single mode).
-async function invite(email: string, fullName: string | null, site: string, single = false): Promise<InviteResult> {
-  const { data: link, error } = await admin.auth.admin.generateLink({
-    type: "recovery",
-    email,
-    options: { redirectTo: `${site}/nove-heslo` },
-  });
-  const hashed = link?.properties?.hashed_token;
-  if (!hashed || !link.user) {
-    if (single && error && (error.status === 404 || /not found/i.test(error.message))) {
-      return { ok: false, error: NOT_FOUND };
-    }
-    return { ok: false, error: error?.message ?? "Odkaz sa nepodarilo vytvoriť." };
-  }
-  const inviteUrl = `${site}/nove-heslo?t=${encodeURIComponent(hashed)}`;
-
-  if (fullName === null) {
-    const { data: profile } = await admin.from("profiles").select("full_name").eq("id", link.user.id).maybeSingle();
-    fullName = profile?.full_name ?? null;
-  }
-
-  try {
-    await sendEmail(inviteEmail({ to: email, fullName: fullName ?? "", inviteUrl }));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[invite] ${email}: ${message.slice(0, 800)}`);
-    return { ok: false, error: message.slice(0, 300) };
-  }
-  return { ok: true, userId: link.user.id, inviteUrl };
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

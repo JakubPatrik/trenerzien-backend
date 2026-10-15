@@ -105,7 +105,7 @@ export async function syncSubscription(supabase: SupabaseClient, sub: StripeObje
   if (!userId) {
     if (customer.deleted) throw new Error(`customer ${customer.id} is deleted`);
     if (!customer.email) throw new Error(`customer ${customer.id} has no email — cannot link a user`);
-    userId = await findOrCreateUser(supabase, customer.email, customer.name ?? null);
+    userId = await findOrCreateUser(supabase, customer.email, customer.name ?? null, "stripe-webhook");
   }
 
   const { error } = await supabase.from("memberships").upsert(

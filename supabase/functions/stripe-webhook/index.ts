@@ -7,7 +7,8 @@
 // Secrets:
 //   STRIPE_WEBHOOK_SECRET_TEST / _LIVE        whsec_… of THIS endpoint
 //   STRIPE_SECRET_KEY_TEST / _LIVE            restricted key, Subscriptions + Customers: read
-//   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync
+//   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync + invitation
+//   SMARTEMAILING_SENDER_EMAIL                invitation sender
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   built in
 //
 // Every handled event is reduced to a subscription id; the subscription is
@@ -15,13 +16,16 @@
 // membership.ts). That makes processing idempotent and order-independent.
 // On invoice.paid (first payment and every renewal) the customer is also put
 // on the plan's SmartEmailing contact list; when access is revoked (membership
-// no longer active), they're taken off all KLUB lists.
+// no longer active), they're taken off all KLUB lists. A member whose account
+// this webhook created gets the KLUB invitation (set-password link) once the
+// membership is active — once, see _shared/invitations.ts.
 //
 // Responses: 400 for a bad request/signature, 500 when not configured or when
 // processing fails (the stripe_events row is removed, so Stripe's automatic
 // retries — and "Resend" — process it again). Everything else 200.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { inviteIfCreatedBy } from "../_shared/invitations.ts";
 import { importContact, removeFromContactlists } from "../_shared/smartemailing.ts";
 import { type Env, type StripeObject, stripeGet, verifyStripeSignature } from "../_shared/stripe.ts";
 import { KLUB_CONTACTLISTS, syncSubscription } from "./membership.ts";
@@ -148,6 +152,11 @@ Deno.serve(async (req) => {
         );
         console.log(`[smartemailing] ${customer.email} → list ${result.contactlist_id}`);
       }
+    }
+
+    if (result.action === "synced" && result.status === "active") {
+      const invited = await inviteIfCreatedBy(supabase, result.user_id, "stripe-webhook");
+      if (invited) console.log(`[invite] ${invited} invited (user ${result.user_id})`);
     }
 
     return json(200, { received: true, ...result });

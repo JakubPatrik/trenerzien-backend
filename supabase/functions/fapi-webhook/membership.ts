@@ -63,7 +63,7 @@ export async function grantMembership(supabase: SupabaseClient, invoice: FapiObj
 
   const customer = invoice.customer ?? {};
   if (!customer.email) throw new RejectedInvoice(`invoice ${invoice.number} has no customer e-mail — cannot link a user`);
-  const userId = await findOrCreateUser(supabase, customer.email, customerName(customer));
+  const userId = await findOrCreateUser(supabase, customer.email, customerName(customer), "fapi-webhook");
 
   // Renewal paid before the current period ends: the new one follows it.
   const { data: latest, error: latestError } = await supabase

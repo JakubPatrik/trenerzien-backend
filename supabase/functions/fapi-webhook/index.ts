@@ -9,7 +9,8 @@
 // Secrets:
 //   FAPI_USERNAME, FAPI_PASSWORD              FAPI login e-mail + API key
 //   FAPI_ACCEPT_TEST                          "true" → also process test invoices
-//   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync
+//   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync + invitation
+//   SMARTEMAILING_SENDER_EMAIL                invitation sender
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   built in
 //
 // FAPI posts only the invoice id + time + security (form-urlencoded). The
@@ -17,16 +18,19 @@
 // a paid final document grants access (see membership.ts). FAPI notifies once
 // per document, so a paid proforma and its invoice would otherwise grant twice.
 // The customer is then put on the plan's SmartEmailing contact list — also for
-// an already granted invoice, so a retry / resend repairs a failed import.
+// an already granted invoice, so a retry / resend repairs a failed import — and,
+// if this webhook created her account, sent the KLUB invitation (set-password
+// link) once (_shared/invitations.ts); a retry sends one that failed.
 //
 // Responses: FAPI retries only 429 / 5xx (3× within ~15 s); any other non-2xx
 // shows as a failed notification in FAPI and can be resent from there.
 //   400  bad request / ?plan, invalid security, not paid, no e-mail
-//   500  not configured, FAPI API, database or SmartEmailing failure
+//   500  not configured, FAPI API, database, SmartEmailing or invitation failure
 //   200  granted, already granted, or skipped (proforma, cancelled, test)
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { FapiError, fapiGet, isInvoiceSecurityValid } from "../_shared/fapi.ts";
+import { inviteIfCreatedBy } from "../_shared/invitations.ts";
 import { importContact } from "../_shared/smartemailing.ts";
 import { customerName, grantMembership, PLANS, RejectedInvoice } from "./membership.ts";
 
@@ -137,5 +141,15 @@ Deno.serve(async (req) => {
     return failed(500, `access granted, SmartEmailing import failed: ${message}`);
   }
 
-  return json(200, { status: "OK", membership: result, contactlist: listId });
+  let invited: string | null;
+  try {
+    invited = await inviteIfCreatedBy(supabase, result.user_id, "fapi-webhook");
+    if (invited) console.log(`[invite] ${invited} invited (user ${result.user_id})`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[invite] ${invoice.number}: ${message}`);
+    return failed(500, `access granted, ${message}`);
+  }
+
+  return json(200, { status: "OK", membership: result, contactlist: listId, invited });
 });

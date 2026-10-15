@@ -3,7 +3,7 @@
 //
 //   deno run -A supabase/functions/send-invitations/preview.ts [out-dir]
 
-import { inviteEmail } from "./email.ts";
+import { inviteEmail } from "../_shared/invite-email.ts";
 
 const outDir = Deno.args[0] ?? await Deno.makeTempDir({ prefix: "invite-email-" });
 await Deno.mkdir(outDir, { recursive: true });

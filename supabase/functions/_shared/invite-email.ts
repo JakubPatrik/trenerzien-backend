@@ -1,8 +1,8 @@
 // Invitation to KLUB (Slovak): link to /nove-heslo where the member sets her password.
 // Preview locally: deno run -A supabase/functions/send-invitations/preview.ts
 
-import { escapeHtml, layout, link } from "../_shared/email-layout.ts";
-import type { Email } from "../_shared/smartemailing.ts";
+import { escapeHtml, layout, link } from "./email-layout.ts";
+import type { Email } from "./smartemailing.ts";
 
 export const SENDER_NAME = "KLUB O DEKÁDU MLADŠIA";
 

@@ -1,6 +1,7 @@
 // Find or create the Supabase user for a purchase (profiles + auth.users).
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { Creator } from "./invitations.ts";
 
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -19,12 +20,13 @@ async function findUserIdByEmail(supabase: SupabaseClient, email: string): Promi
 
 // Existing account → its id. Otherwise create the auth user; the
 // handle_new_user() trigger creates the profile + "user" role. The account has
-// no password: the admin sends the invite from /admin/users ("Pozvať"), since
-// profiles.invited_at stays null.
+// no password; app_metadata.created_by marks it for the webhook's automatic
+// invitation (invitations.ts inviteIfCreatedBy).
 export async function findOrCreateUser(
   supabase: SupabaseClient,
   email: string,
   name: string | null,
+  creator: Creator,
 ): Promise<string> {
   const normalized = email.trim().toLowerCase();
 
@@ -35,6 +37,7 @@ export async function findOrCreateUser(
     email: normalized,
     email_confirm: true,
     user_metadata: name ? { display_name: name } : {},
+    app_metadata: { created_by: creator },
   });
   if (!error && data.user) {
     console.log(`[access] created user ${data.user.id} for ${normalized}`);
