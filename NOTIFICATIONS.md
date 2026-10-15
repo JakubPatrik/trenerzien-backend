@@ -59,3 +59,38 @@ npx -y deno run -A supabase/functions/notify-emails/preview.ts [výstupný-prie�
 ```
 
 Logy: Dashboard → Edge Functions → `notify-emails` (`[notify]`).
+
+# Pripomienka konzultácie — edge function `consultation-reminder`
+
+Každý deň o **8:00 (Bratislava)** pg_cron (`consultation-reminder`, `web/migrations/11.sql`)
+pozrie `consultation_sessions`. Ak je `held_on` dnes, cez pg_net zavolá funkciu a tá pošle
+e-mail „Dnes o 19:00 konzultácia s Danielom na ZOOM“ všetkým aktívnym členkám klubu.
+
+- Príjemkyne: `consultation_reminder_recipients()` = `is_club_member`, bez
+  `membership_paused_at`, s e-mailom, `notification_prefs.email_consultations` (chýbajúci
+  riadok = zapnuté).
+- Log: `notification_emails` (`kind = 'consultation_reminder'`, `ref` = id konzultácie). Kto
+  už dostal, nedostane znova; opakované spustenie len dopošle neúspešné.
+- pg_cron beží v UTC → job ide o 6:00 aj 7:00 UTC, pokračuje len keď je v Bratislave 8:00.
+- Tlačidlo: pevný ZOOM odkaz (`ZOOM_URL` v `consultation-reminder/email.ts`), rovnaký pre každú konzultáciu.
+- Autorizácia: `Bearer CONSULTATION_REMINDER_SECRET` (aj vo Vault ako
+  `consultation_reminder_secret`, URL ako `consultation_reminder_url`). Tag `klub-konzultacia`.
+
+## Nasadenie
+
+```bash
+supabase/web/bin/23-consultation-reminder.sh
+supabase/web/bin/23-consultation-reminder.sh test <tvoj e-mail>   # jeden e-mail, nič sa neloguje
+```
+
+Náhľad (nič neposiela):
+
+```bash
+npx -y deno run -A supabase/functions/consultation-reminder/preview.ts [výstupný-priečinok]
+```
+
+Kontrola: `select * from cron.job_run_details order by start_time desc limit 5;` a odpoveď
+funkcie v `net._http_response`. Logy: Dashboard → Edge Functions → `consultation-reminder`.
+
+**KLUB (Lovable):** v `/profil#upozornenia` pridať prepínač „Pripomienky konzultácií“ →
+`notification_prefs.email_consultations` (e-mail naň odkazuje).
