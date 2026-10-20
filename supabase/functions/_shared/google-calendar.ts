@@ -43,15 +43,33 @@ function calendarUrl(path: string, params: Record<string, string> = {}): string 
   return `${CALENDAR_API}/calendars/${calendarId}/events${path}${qs ? `?${qs}` : ""}`;
 }
 
+// Google throttles short bursts on one calendar (403 rateLimitExceeded, even at a few
+// bookings a day; a retry seconds later goes through). Backoff ≈ 15 s in total. Every
+// call here is safe to repeat: the event id makes creation idempotent (409 → read it).
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+
 async function call(method: string, url: string, body?: unknown): Promise<Response> {
-  return fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${await accessToken()}`,
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  for (let attempt = 0;; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${await accessToken()}`,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (attempt >= RETRY_DELAYS_MS.length || !(await isRateLimited(res))) return res;
+    await res.body?.cancel();
+    const wait = RETRY_DELAYS_MS[attempt] + Math.round(Math.random() * 500);
+    console.warn(`[google] ${method} rate limited, retry ${attempt + 1} in ${wait} ms`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+async function isRateLimited(res: Response): Promise<boolean> {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  return /rateLimitExceeded|userRateLimitExceeded/.test(await res.clone().text());
 }
 
 async function fail(res: Response, what: string): Promise<never> {
@@ -97,27 +115,37 @@ type Attendee = { email: string; displayName?: string };
 export type Meeting = { eventId: string; meetLink: string; organizerEmail: string | null };
 
 export async function createMeeting(m: NewMeeting): Promise<Meeting> {
-  const eventId = eventIdFor(m.appointmentId);
-  const res = await call("POST", calendarUrl("", { conferenceDataVersion: "1", sendUpdates: "all" }), {
-    id: eventId,
-    summary: m.summary,
-    description: m.description,
-    start: { dateTime: m.start, timeZone: m.timeZone },
-    end: { dateTime: m.end, timeZone: m.timeZone },
-    attendees: m.notify,
-    guestsCanInviteOthers: false,
-    reminders: { useDefault: true },
-    extendedProperties: { private: { appointment_id: m.appointmentId } },
-    conferenceData: {
-      createRequest: { requestId: m.appointmentId, conferenceSolutionKey: { type: "hangoutsMeet" } },
-    },
-  });
+  const insert = (id: string) =>
+    call("POST", calendarUrl("", { conferenceDataVersion: "1", sendUpdates: "all" }), {
+      id,
+      summary: m.summary,
+      description: m.description,
+      start: { dateTime: m.start, timeZone: m.timeZone },
+      end: { dateTime: m.end, timeZone: m.timeZone },
+      attendees: m.notify,
+      guestsCanInviteOthers: false,
+      reminders: { useDefault: true },
+      extendedProperties: { private: { appointment_id: m.appointmentId } },
+      conferenceData: {
+        createRequest: { requestId: id, conferenceSolutionKey: { type: "hangoutsMeet" } },
+      },
+    });
 
+  let eventId = eventIdFor(m.appointmentId);
+  let res = await insert(eventId);
   let event: GoogleEvent;
   if (res.status === 409) {
     const existing = await call("GET", calendarUrl(`/${eventId}`, { conferenceDataVersion: "1" }));
     if (!existing.ok) await fail(existing, "event lookup");
     event = await existing.json();
+    // A failed earlier attempt for this appointment deleted its event (double opt-in
+    // retries the same appointment); a deleted event keeps its id, so start a new one.
+    if (event.status === "cancelled") {
+      eventId = `${eventId}r${Date.now().toString(32)}`;
+      res = await insert(eventId);
+      if (!res.ok) await fail(res, "event create");
+      event = await res.json();
+    }
   } else {
     if (!res.ok) await fail(res, "event create");
     event = await res.json();

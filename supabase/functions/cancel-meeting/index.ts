@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     if (!isAdmin) return json(req, 403, { error: "forbidden" });
   }
 
-  if (appt.status !== "confirmed" && appt.status !== "pending") {
+  if (!["confirmed", "pending", "pending_opt_in"].includes(appt.status)) {
     return json(req, 409, { error: "not_active", status: appt.status });
   }
 

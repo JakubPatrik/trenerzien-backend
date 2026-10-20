@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Test 4.sql + 5.sql + 6.sql + 7.sql (booking, KLUB guides → personalistky) on a throwaway LOCAL Postgres — never touches Supabase.
+# Test 4.sql + 5.sql + 6.sql + 7.sql + 12.sql (booking, KLUB guides → personalistky) on a throwaway LOCAL Postgres — never touches Supabase.
 # Needs Postgres binaries (brew install postgresql@17). Steps:
 #   1. temp cluster + minimal Supabase stand-ins (roles, auth.users, auth.uid(), has_role)
 #   2. 0.sql (consultation_applications) + 4.sql, 5.sql twice (must be re-runnable)
 #   3. booking-test.sql + booking-guides-test.sql assertions
 #   3b. 6.sql twice + booking-recruiters-test.sql (personalistky take over from guides)
 #   3c. 7.sql twice + booking-recruiter-rpc-test.sql (add_recruiter / remove_recruiter)
+#   3d. 12.sql twice + booking-opt-in-test.sql (double opt-in holds, claim, expiry, reissue, RLS)
 #   4. 30 concurrent bookings on 3 slots → exactly 2 per slot (2 helpers), no deadlocks
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -63,6 +64,16 @@ for f in 7 7; do
   "${P[@]}" -f "$MIGRATIONS_DIR/$f.sql" 2>&1 | grep -v NOTICE || true
 done
 "${P[@]}" -f "$TESTS_DIR/booking-recruiter-rpc-test.sql"
+for f in 12 12; do
+  "${P[@]}" -f "$MIGRATIONS_DIR/$f.sql" 2>&1 | grep -v NOTICE || true
+done
+"${P[@]}" -f "$TESTS_DIR/booking-opt-in-test.sql"
+for f in 4 5 12; do   # what 08-apply-booking.sh re-applies once 12.sql is live
+  "${P[@]}" -f "$MIGRATIONS_DIR/$f.sql" 2>&1 | grep -v NOTICE || true
+done
+"${P[@]}" -At -c "SELECT CASE WHEN pg_get_functiondef('public.book_appointment(text,timestamptz,uuid)'::regprocedure) LIKE '%reserve_appointment%'
+                     THEN 'reapply: 12.sql definitions restored' ELSE 'FAIL' END" | tee "$TMP/reapply"
+grep -q FAIL "$TMP/reapply" && { echo "FAIL: 4/5 re-apply left the old book_appointment" >&2; exit 1; }
 
 echo "== concurrency: 30 parallel bookings on 3 slots"
 "${P[@]}" -c "INSERT INTO public.consultation_applications (token, name, email, phone)

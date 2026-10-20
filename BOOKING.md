@@ -199,7 +199,7 @@ await supabase.functions.invoke("cancel-meeting", { body: { appointment_id: id, 
 | helper | „Máš nový *pohovor.*“ — dátum, čas, meno / e-mail / telefón leada, tlačidlo Meet | SmartEmailing, tag `booking-helper` |
 
 Oba SmartEmailing e-maily odchádzajú z `pohovory@trenerzien.sk` (odosielateľ aj
-reply-to, natvrdo v `book-meeting/email.ts`), nie zo `SMARTEMAILING_SENDER_EMAIL`
+reply-to, natvrdo v `_shared/booking-email.ts`), nie zo `SMARTEMAILING_SENDER_EMAIL`
 — `pohovory@` musí byť v SmartEmailingu potvrdený odosielateľ.
 
 - **Google:** udalosť sa vytvorí len s vlastníkom (`sendUpdates=all`), po vzniku
@@ -217,7 +217,7 @@ reply-to, natvrdo v `book-meeting/email.ts`), nie zo `SMARTEMAILING_SENDER_EMAIL
   `appointments.email_error` = `lead: …` / `helper: …` (oddelené ` | `).
 - **Zrušenie** (`cancel-meeting`) zatiaľ posiela Google — zrušenie dostanú všetci hostia
   vrátane leada a helpera.
-- **Šablóny:** `book-meeting/email.ts` (`leadEmail` / `helperEmail`), `book-meeting/ics.ts`;
+- **Šablóny:** `_shared/booking-email.ts` (`leadEmail` / `helperEmail` / `ownerEmail`), `_shared/ics.ts`;
   spoločný layout (hlavička, pätička, tlačidlo) v `_shared/email-layout.ts` — používajú ho aj
   pozvánky do klubu ([INVITATIONS.md](INVITATIONS.md)). Webové fonty (Bebas Neue, Playfair Display, Inter) zobrazí
   Apple Mail / iOS, Gmail použije záložné (Arial Narrow / Impact, Georgia, Arial).
@@ -288,6 +288,7 @@ helper vznikne / deaktivuje sa, neaktívny helper nezapíše dostupnosť, `membe
 
 ## Ďalej (nie je súčasťou)
 
+- **Double opt-in pred pozvánkou** (postavené, nenasadené): [BOOKING_OPT_IN.md](BOOKING_OPT_IN.md).
 - Pripomienka 24 h vopred (pg_cron + pg_net → SmartEmailing).
 - Vlastný e-mail o zrušení cez SmartEmailing (`METHOD:CANCEL` .ics) namiesto Google.
 - Zrušenie / presun leadom cez odkaz s tokenom (zatiaľ e-mailom na podporu).

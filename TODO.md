@@ -30,4 +30,5 @@ The sync finished: all 65 memberships are linked, none is still "lifetime", and 
 - [x] **Personalistka role (`6.sql`) applied to production** (`17`). Only recruiters (role `personalistka`) lead interviews; all 8 guide helpers are now inactive.
 - [ ] **Add the recruiters:** `18-recruiter.sh add <email>`. Until then the WEB offers no interview slots.
 - [ ] **KLUB frontend (Lovable):** `supabase/klub/KLUB_LOVABLE_PERSONALISTKA.md`.
+- [ ] **Double opt-in before the invitation** (agreed with Lovable): built and tested locally; deploy per `BOOKING_OPT_IN.md` section 4.5 once Lovable ships the website.
 - [ ] **Phase 2:** mark meetings as completed or no-show in KLUB, reminder emails, self-service cancellation for leads, busy check against helpers' own calendars.

@@ -11,6 +11,8 @@
 #                 GOOGLE_CALENDAR_ID (optional, default "primary")
 # Browser access: BOOKING_ALLOWED_ORIGINS (comma-separated; unset = any origin)
 # Google invite:  BOOKING_OWNER_EMAIL (only address Google emails; default pohovory@trenerzien.sk)
+# Double opt-in:  BOOKING_SITE_URL (confirmation link base; default https://trenerzien.sk),
+#                 BOOKING_DOUBLE_OPT_IN (true/false; or 24-booking-opt-in.sh on|off)
 # KLUB emails:    CLUB_PUBLIC_URL (links in notify-emails; default https://klub.trenerzien.sk)
 # SmartEmailing:  SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY,
 #                 SMARTEMAILING_SENDER_EMAIL, SMARTEMAILING_SENDER_NAME,
@@ -21,7 +23,7 @@ source ./00-config.sh
 
 NAMES=(
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN GOOGLE_CALENDAR_ID
-  BOOKING_ALLOWED_ORIGINS BOOKING_OWNER_EMAIL CLUB_PUBLIC_URL
+  BOOKING_ALLOWED_ORIGINS BOOKING_OWNER_EMAIL BOOKING_SITE_URL BOOKING_DOUBLE_OPT_IN CLUB_PUBLIC_URL
   SMARTEMAILING_USERNAME SMARTEMAILING_API_KEY SMARTEMAILING_SENDER_EMAIL
   SMARTEMAILING_SENDER_NAME SMARTEMAILING_REPLY_TO
 )
@@ -31,7 +33,7 @@ for n in "${NAMES[@]}"; do
   if [ -n "${!n:-}" ]; then ARGS+=("$n=${!n}"); fi
 done
 if [ ${#ARGS[@]} -eq 0 ]; then
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 

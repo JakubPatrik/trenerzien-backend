@@ -3,6 +3,8 @@
 # booking_settings, appointments, booking_slots(), book_appointment()) and
 # 5.sql (KLUB guides: dated availability, membership → helpers) to the vyzva
 # project. Always both, in order — 5.sql replaces booking_slots() from 4.sql.
+# Once 12.sql (double opt-in) is live it is re-applied too: it replaces
+# booking_slots() / book_appointment() and the helper RLS from 4.sql + 5.sql.
 # Re-runnable: IF NOT EXISTS / CREATE OR REPLACE / DROP IF EXISTS.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -13,7 +15,11 @@ psql "$DIRECT_URL" -c "select current_database(), inet_server_addr();"
 
 confirm "About to create the booking tables, functions and RLS policies in the DB above."
 
-for f in "$MIGRATIONS_DIR/4.sql" "$MIGRATIONS_DIR/5.sql"; do
+files=("$MIGRATIONS_DIR/4.sql" "$MIGRATIONS_DIR/5.sql")
+if [ "$(psql "$DIRECT_URL" -Atc "select to_regprocedure('public.hold_appointment(text,timestamptz,uuid)') is not null")" = "t" ]; then
+  files+=("$MIGRATIONS_DIR/12.sql")
+fi
+for f in "${files[@]}"; do
   echo "== $f"
   psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f "$f"
 done

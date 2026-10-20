@@ -1,11 +1,20 @@
-// Renders the booking emails (lead, helper, owner) with sample data and opens them in the browser.
+// Renders the booking emails (lead, helper, owner; double opt-in: opt-in, nudge-expired,
+// nudge-email-failed) with sample data and opens them in the browser.
 // Nothing is sent. Writes the HTML, plain-text and .ics (lead, helper) versions of each.
 //
 //   deno run -A supabase/functions/book-meeting/preview.ts [out-dir]
 //
 // Open the written .ics too (macOS: `open <dir>/lead.ics`) to check how Calendar imports it.
 
-import { type BookingData, helperEmail, leadEmail, ownerEmail } from "./email.ts";
+import {
+  type BookingData,
+  helperEmail,
+  leadEmail,
+  nudgeEmail,
+  type NudgeData,
+  optInEmail,
+  ownerEmail,
+} from "../_shared/booking-email.ts";
 
 const outDir = Deno.args[0] ?? await Deno.makeTempDir({ prefix: "booking-email-" });
 await Deno.mkdir(outDir, { recursive: true });
@@ -42,10 +51,32 @@ const data: BookingData = {
 
 const opener = Deno.build.os === "darwin" ? "open" : Deno.build.os === "windows" ? "explorer" : "xdg-open";
 
+const expiresAt = new Date("2026-10-04T14:30:00+02:00");
+const nudge = (reason: NudgeData["reason"]): NudgeData => ({
+  reason,
+  start: data.start,
+  end: data.end,
+  timeZone: data.timeZone,
+  expiresAt,
+  lead: { name: data.lead.name, email: data.lead.email, phone: data.lead.phone },
+  helper: data.helper,
+});
+
 const emails = [
   ["lead", leadEmail(data)],
   ["helper", helperEmail(data)],
   ["owner", ownerEmail(data, "pohovory@trenerzien.sk")],
+  ["opt-in", optInEmail({
+    start: data.start,
+    end: data.end,
+    timeZone: data.timeZone,
+    expiresAt,
+    link: "https://trenerzien.sk/pohovor/dakujem?t=" + "ab".repeat(32),
+    lead: data.lead,
+    helper: data.helper,
+  })],
+  ["nudge-expired", nudgeEmail(nudge("expired"), "pohovory@trenerzien.sk")],
+  ["nudge-email-failed", nudgeEmail(nudge("email_failed"), "pohovory@trenerzien.sk")],
 ] as const;
 
 for (const [name, email] of emails) {
@@ -56,4 +87,4 @@ for (const [name, email] of emails) {
   await new Deno.Command(opener, { args: [`${outDir}/${name}.html`] }).output();
 }
 
-console.log(`Written to ${outDir}: lead/helper/owner .html, .txt; lead/helper .ics`);
+console.log(`Written to ${outDir}: lead/helper/owner/opt-in/nudge-* .html, .txt; lead/helper .ics`);
