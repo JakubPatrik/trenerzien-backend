@@ -19,7 +19,7 @@ krok 2 výber    ──rpc booking_slots()──▶ voľné termíny (helper × 
                                          Google Calendar       ── udalosť + Meet link, pozvánka len vlastníkovi
                                          appointments          ── 'confirmed'
                                          SmartEmailing         ── e-mail + .ics leadovi a helperovi
-helper / admin  ──POST cancel-meeting──▶ zmaže udalosť (Google pošle zrušenie), slot sa uvoľní
+personalistka / admin ──POST cancel-meeting──▶ zmaže udalosť (Google pošle zrušenie), slot sa uvoľní
 
 user_roles 'personalistka' ──trigger──▶ helpers (vytvorí / active)
 KLUB personalistka ──insert/delete slot (date)──▶ helper_availability ──▶ booking_slots() na WEBe

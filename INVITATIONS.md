@@ -13,7 +13,12 @@ admin ──POST send-invitations (Bearer JWT)──▶ has_role(admin)
 členka ──klik──▶ klub.trenerzien.sk/nove-heslo?t=<hashed_token>
                  submit: verifyOtp({ token_hash, type: 'recovery' }) → updateUser({ password })
                  → profiles.invitation = 'accepted'
+                 → trigger: profiles.email_verified_at = now() (prvýkrát; web/migrations/14.sql)
 ```
+
+Overený e-mail: klik na pozvánku + uložené heslo = `profiles.email_verified_at` (rovnako ako
+`consultation_applications.email_verified_at` pri rezervácii). Nastavuje ho len databáza,
+členka nie. SmartEmailing sa tým nemení — kontakt je na zozname členstva už od platby.
 
 | Čo | Kde |
 | --- | --- |

@@ -112,7 +112,7 @@ list 615) is now `confirmBooking()` in `_shared/booking.ts`.
 | `book-meeting` | `BOOKING_DOUBLE_OPT_IN=true` → `hold_appointment()` + `booking-opt-in` email. If the email fails, a `meeting-nudge` (`email_failed`) goes out right away. 200 returns `status: "pending_opt_in"`, `meet_link: null`, `opt_in_expires_at`. 409 `already_booked` returns the hold the same way. No resend. Flag off → as today, via `confirmBooking()`. |
 | `confirm-meeting` (new) | `POST { token }`. 200 `confirmed` / `expired` + `rebook_token` / `not_found`. 400 for a malformed token, 502 for calendar or DB failure (`release_claim()`, the link works again). On `processing` it polls up to 15 s and never reports `confirmed` early. |
 | `booking-holds` (new) | `Bearer BOOKING_HOLDS_SECRET`. `{ action: "tick" }` (cron) sends one `meeting-nudge` (`expired`) per row and sets `nudge_sent_at`. `{ action: "resend", appointment_id, email? }` (support) calls `reissue_opt_in()` and sends the email. |
-| `cancel-meeting` | can also cancel a `pending_opt_in` hold (admin). |
+| `cancel-meeting` | admin: any active booking, incl. a `pending_opt_in` hold. Personalistka: only her own confirmed future meeting (active helper). Any origin (KLUB calls it). Lovable: `supabase/klub/KLUB_LOVABLE_ZRUSENIE_POHOVORU.md`. |
 
 Templates in `_shared/booking-email.ts`. Preview: `npx -y deno run -A supabase/functions/book-meeting/preview.ts`.
 

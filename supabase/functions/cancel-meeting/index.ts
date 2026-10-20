@@ -1,16 +1,24 @@
-// Cancel a booked consultation call (admin, or the helper it belongs to).
+// Cancel a booked consultation call: an admin (any active booking, incl. an unconfirmed
+// double opt-in hold), or the personalistka it belongs to (her own confirmed meeting that
+// hasn't started; her helper record must be active).
 //
 // Endpoint: POST https://<ref>.supabase.co/functions/v1/cancel-meeting
 //   headers: Authorization: Bearer <user access token>
 //   body:    { appointment_id, reason? }
+//   → 200 { cancelled: true }
+//     400 invalid_request · 401 unauthorized · 403 forbidden · 404 not_found
+//     409 { error: "not_active", status } | { error: "already_started" }
+//     502 calendar_unavailable (nothing changed, try again) · 500 server_error
 // Deployed with --no-verify-jwt; the user's token is verified here via Auth.
+// Any origin (CORS): called from KLUB (klub.trenerzien.sk) and the WEB admin; the
+// JWT is the authorization.
 //
 // Deletes the Google event (Google emails the cancellation to the lead and the
 // helper), marks the appointment 'cancelled' — the slot is free again — and
 // clears the booking_* columns on the application, so the lead can book anew.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { json, preflight } from "../_shared/http.ts";
+import { json as jsonFor, preflight } from "../_shared/http.ts";
 import { deleteMeeting } from "../_shared/google-calendar.ts";
 
 const supabase = createClient(
@@ -19,8 +27,11 @@ const supabase = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } },
 );
 
+const json = (req: Request, status: number, body: Record<string, unknown>) =>
+  jsonFor(req, status, body, { anyOrigin: true });
+
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return preflight(req);
+  if (req.method === "OPTIONS") return preflight(req, { anyOrigin: true });
   if (req.method !== "POST") return json(req, 405, { error: "method not allowed" });
 
   const jwt = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -37,14 +48,15 @@ Deno.serve(async (req) => {
 
   const { data: appt, error } = await supabase
     .from("appointments")
-    .select("id, status, google_event_id, application_id, helper:helpers(user_id)")
+    .select("id, status, starts_at, google_event_id, application_id, helper:helpers(user_id, active)")
     .eq("id", appointmentId)
     .maybeSingle<{
       id: string;
       status: string;
+      starts_at: string;
       google_event_id: string | null;
       application_id: string;
-      helper: { user_id: string | null };
+      helper: { user_id: string | null; active: boolean };
     }>();
   if (error) {
     console.error(`[cancel] lookup ${appointmentId} failed: ${error.message}`);
@@ -52,14 +64,17 @@ Deno.serve(async (req) => {
   }
   if (!appt) return json(req, 404, { error: "not_found" });
 
-  const isHelper = appt.helper.user_id === userId;
-  if (!isHelper) {
-    const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
-    if (!isAdmin) return json(req, 403, { error: "forbidden" });
-  }
+  const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
+  const isHelper = !isAdmin && appt.helper.user_id === userId && appt.helper.active;
+  if (!isAdmin && !isHelper) return json(req, 403, { error: "forbidden" });
 
-  if (!["confirmed", "pending", "pending_opt_in"].includes(appt.status)) {
+  // A personalistka only sees (and cancels) confirmed meetings; an admin also stuck or held ones.
+  const cancellable = isAdmin ? ["confirmed", "pending", "pending_opt_in"] : ["confirmed"];
+  if (!cancellable.includes(appt.status)) {
     return json(req, 409, { error: "not_active", status: appt.status });
+  }
+  if (isHelper && new Date(appt.starts_at) <= new Date()) {
+    return json(req, 409, { error: "already_started" });
   }
 
   if (appt.google_event_id) {
