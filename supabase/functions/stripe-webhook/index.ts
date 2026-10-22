@@ -6,7 +6,8 @@
 //
 // Secrets:
 //   STRIPE_WEBHOOK_SECRET_TEST / _LIVE        whsec_… of THIS endpoint
-//   STRIPE_SECRET_KEY_TEST / _LIVE            restricted key, Subscriptions + Customers: read
+//   STRIPE_SECRET_KEY_TEST / _LIVE            secret key (reads subscriptions + customers,
+//                                             sets cancel_at_period_end on yearly ones)
 //   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync + invitation
 //   SMARTEMAILING_SENDER_EMAIL                invitation sender
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   built in
@@ -19,6 +20,9 @@
 // no longer active), they're taken off all KLUB lists. A member whose account
 // this webhook created gets the KLUB invitation (set-password link) once the
 // membership is active — once, see _shared/invitations.ts.
+// The yearly membership is sold as one year, not a renewing plan: a yearly
+// subscription is set to cancel at period end,
+// so Stripe ends it after a year (subscription.deleted → membership ended).
 //
 // Responses: 400 for a bad request/signature, 500 when not configured or when
 // processing fails (the stripe_events row is removed, so Stripe's automatic
@@ -27,8 +31,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { inviteIfCreatedBy } from "../_shared/invitations.ts";
 import { importContact, removeFromContactlists } from "../_shared/smartemailing.ts";
-import { type Env, type StripeObject, stripeGet, verifyStripeSignature } from "../_shared/stripe.ts";
+import { type Env, type StripeObject, stripeGet, stripePost, verifyStripeSignature } from "../_shared/stripe.ts";
 import { KLUB_CONTACTLISTS, syncSubscription } from "./membership.ts";
+
+// Lookup keys sold as a single year.
+const ONE_YEAR_LOOKUP_KEYS = new Set(["klub_rocne_clenstvo"]);
 
 const SUBSCRIPTION_EVENTS = new Set([
   "customer.subscription.created",
@@ -59,6 +66,13 @@ function idOf(ref: unknown): string | null {
     return (ref as StripeObject).id;
   }
   return null;
+}
+
+function shouldEndAfterOneYear(sub: StripeObject): boolean {
+  if (sub.status !== "active" && sub.status !== "trialing") return false;
+  if (sub.cancel_at_period_end || sub.cancel_at) return false;
+  // deno-lint-ignore no-explicit-any
+  return (sub.items?.data ?? []).some((i: any) => ONE_YEAR_LOOKUP_KEYS.has(i.price?.lookup_key));
 }
 
 // The event body's shape follows the endpoint's API version, so read the
@@ -137,6 +151,12 @@ Deno.serve(async (req) => {
       console.log(`[sync] ${subscriptionId} skipped (${result.reason})`);
     } else {
       console.log(`[sync] ${subscriptionId} → ${result.status} until ${result.ends_at} (user ${result.user_id})`);
+    }
+
+    // Fires customer.subscription.updated, which re-syncs and then skips this.
+    if (shouldEndAfterOneYear(sub)) {
+      await stripePost(`subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_period_end: "true" }, stripeKey);
+      console.log(`[stripe] ${subscriptionId} set to cancel at period end (one-year membership)`);
     }
 
     // A failure throws → 500, Stripe retries; the sync above is idempotent.

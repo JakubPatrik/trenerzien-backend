@@ -76,3 +76,21 @@ export async function stripeGet(path: string, secretKey: string): Promise<Stripe
   }
   return body;
 }
+
+// POST https://api.stripe.com/v1/<path> with form-encoded params; throws like stripeGet.
+export async function stripePost(path: string, params: Record<string, string>, secretKey: string): Promise<StripeObject> {
+  const res = await fetch(`${STRIPE_API}/${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Stripe-Version": STRIPE_VERSION,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(params),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(`Stripe POST ${path} failed (${res.status}): ${body?.error?.message ?? "unknown"}`);
+  }
+  return body;
+}
