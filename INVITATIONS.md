@@ -54,7 +54,9 @@ Chyby: 401 bez prihlásenia, 403 nie admin, 400 zlé pole, 500 chýbajú SmartEm
 ## Pravidlá
 
 - **Len členky klubu:** `memberships.name` ∈ Zakladateľské členstvo (ročné / mesačné /
-  prevodom), Sprievodkyňa klubu ∪ `profiles.membership_ends_on is not null` (bývalé).
+  prevodom), Členstvo (mesačné / štvrťročné / ročné) ∪ roly `lider` / `personalistka` /
+  `sprievodkyna` ∪ `profiles.membership_ends_on is not null` (bývalé). Sprievodkyňa je
+  rola, nie členstvo (`15.sql`).
   `single` pošle na akýkoľvek existujúci účet (aj test na vlastnú adresu).
 - **Odkaz** vždy na `https://klub.trenerzien.sk/nove-heslo` — `siteUrl` z appky sa
   ignoruje (nikdy preview / localhost).

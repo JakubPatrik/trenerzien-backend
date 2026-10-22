@@ -25,13 +25,18 @@ const CONCURRENCY = 12;
 const ID_CHUNK = 300; // .in() list length (URL limit)
 const PAGE = 1000; // PostgREST row cap
 
-// Club members = these memberships ∪ former members (profiles.membership_ends_on set).
+// Club members = these memberships ∪ club roles ∪ former members
+// (profiles.membership_ends_on set). Same names as public.is_club_member() (15.sql).
 const CLUB_MEMBERSHIPS = [
   "Zakladateľské členstvo — ročné",
   "Zakladateľské členstvo — mesačné",
   "Zakladateľské členstvo — prevodom",
-  "Sprievodkyňa klubu",
+  "Členstvo — mesačné",
+  "Členstvo — štvrťročné",
+  "Členstvo — ročné",
 ];
+// Sprievodkyňa is a role, not a membership (15.sql); admins are not invited.
+const CLUB_ROLES = ["lider", "personalistka", "sprievodkyna"];
 
 const NOT_FOUND = "Takýto e-mail v klube nie je.";
 
@@ -139,6 +144,13 @@ async function clubMemberIds(): Promise<string[]> {
     const { data, error } = await admin.from("memberships").select("user_id")
       .in("name", CLUB_MEMBERSHIPS).order("user_id").range(from, from + PAGE - 1);
     if (error) throw new Error(`memberships: ${error.message}`);
+    for (const r of data) if (r.user_id) ids.add(r.user_id);
+    if (data.length < PAGE) break;
+  }
+  for (let from = 0;; from += PAGE) {
+    const { data, error } = await admin.from("user_roles").select("user_id")
+      .in("role", CLUB_ROLES).order("user_id").range(from, from + PAGE - 1);
+    if (error) throw new Error(`user_roles: ${error.message}`);
     for (const r of data) if (r.user_id) ids.add(r.user_id);
     if (data.length < PAGE) break;
   }

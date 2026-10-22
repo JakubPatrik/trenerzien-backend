@@ -11,7 +11,7 @@ hodnosti a dajú sa kombinovať, jedna žena môže mať aj všetky:
 | --- | --- | --- |
 | **RL** | Legionárna líderka | rola `lider` |
 | **Z** | Zakladateľka | `profiles.founder_at` |
-| **S** | Sprievodkyňa | aktívne členstvo `Sprievodkyňa klubu` |
+| **S** | Sprievodkyňa | rola `sprievodkyna` (`is_guide()`; nie členstvo) |
 | **P** | Personalistka | rola `personalistka` (**nová**) |
 
 Backend (migrácia `6.sql`) je hotový, mení sa len frontend. Nové tabuľky ani migrácie
