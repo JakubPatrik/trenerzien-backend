@@ -4,7 +4,7 @@
 import { escapeHtml, layout, link } from "../_shared/email-layout.ts";
 import type { Email } from "../_shared/smartemailing.ts";
 
-export const SENDER_NAME = "KLUB O DEKÁDU MLADŠIA";
+export const SENDER_NAME = "Klub o dekádu mladšia";
 export const KINDS = ["message", "pair_request", "pair_accepted"] as const;
 export type Kind = typeof KINDS[number];
 

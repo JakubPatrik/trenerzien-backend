@@ -4,7 +4,7 @@
 import { escapeHtml, layout, link } from "../_shared/email-layout.ts";
 import type { Email } from "../_shared/smartemailing.ts";
 
-export const SENDER_NAME = "KLUB O DEKÁDU MLADŠIA";
+export const SENDER_NAME = "Klub o dekádu mladšia";
 export const ZOOM_URL = "https://zoom.us/j/93635373091?pwd=dmxUeExLamtsSzRNQkQvYlJIRjczUT09"; // same for every session
 
 export type Reminder = {

@@ -4,7 +4,7 @@
 import { escapeHtml, layout, link } from "./email-layout.ts";
 import type { Email } from "./smartemailing.ts";
 
-export const SENDER_NAME = "KLUB O DEKÁDU MLADŠIA";
+export const SENDER_NAME = "Klub o dekádu mladšia";
 
 export function inviteEmail(d: { to: string; fullName: string; inviteUrl: string }): Email {
   const name = d.fullName.trim();
@@ -28,7 +28,7 @@ export function inviteEmail(d: { to: string; fullName: string; inviteUrl: string
     "tvoj prístup do KLUBU trénera ŽIEN je pripravený. Zostáva si nastaviť heslo:",
     d.inviteUrl,
     "",
-    "Odkaz platí 7 dní. Ak si o prístup nežiadala, e-mail jednoducho ignoruj.",
+    "Odkaz platí 24 hodín. Ak si o prístup nežiadala, e-mail jednoducho ignoruj.",
     "",
     "Tréner ŽIEN · Mgr. Daniel Čmel",
   ].join("\n");
