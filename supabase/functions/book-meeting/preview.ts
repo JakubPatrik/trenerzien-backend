@@ -34,6 +34,7 @@ const data: BookingData = {
     phone: "+421 900 123 456",
     answers: {
       age: 38,
+      location: "Žilina",
       current_weight: 78.5,
       target_weight: 65,
       health_issues: "Štítna žľaza (Hashimoto), užívam Letrox.",

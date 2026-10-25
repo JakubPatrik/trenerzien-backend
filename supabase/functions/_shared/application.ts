@@ -6,6 +6,7 @@ import { escapeHtml } from "./email-layout.ts";
 // A consultation_applications row (the questionnaire columns).
 export type Answers = {
   age: number | null;
+  location: string | null;
   current_weight: number | null;
   target_weight: number | null;
   health_issues: string | null;
@@ -19,7 +20,7 @@ export type Answers = {
 };
 
 export const ANSWER_COLUMNS =
-  "age, current_weight, target_weight, health_issues, occupation, hobbies, genetics, life_changes, obstacles, vision_one_year, expectations";
+  "age, location, current_weight, target_weight, health_issues, occupation, hobbies, genetics, life_changes, obstacles, vision_one_year, expectations";
 
 // Questionnaire order; empty answers are left out.
 const QUESTIONS: [keyof Answers, string][] = [
@@ -43,11 +44,13 @@ export function weight(a: Answers): string | null {
   return now ?? (target && `cieľ ${target}`);
 }
 
-// Vek / Váha as [label, plain text]; missing ones are left out.
+// Vek / Mesto / Váha as [label, plain text]; missing ones are left out.
 export function vitals(a: Answers): [string, string][] {
   const w = weight(a);
+  const city = a.location?.trim();
   return [
     ...(a.age != null ? [["Vek", String(a.age)] as [string, string]] : []),
+    ...(city ? [["Mesto", city] as [string, string]] : []),
     ...(w ? [["Váha", w] as [string, string]] : []),
   ];
 }

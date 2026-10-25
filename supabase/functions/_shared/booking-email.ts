@@ -111,7 +111,7 @@ function contact(lead: { name: string; email: string; phone: string }) {
   return { rows, text };
 }
 
-// The questionnaire under the call summary: vek / váha first, then the free-text answers.
+// The questionnaire under the call summary: vek / mesto / váha first, then the free-text answers.
 function questionnaire(a: Answers) {
   const all = [...vitals(a), ...answers(a)];
   return {
