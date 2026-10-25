@@ -20,6 +20,9 @@
 // no longer active), they're taken off all KLUB lists. A member whose account
 // this webhook created gets the KLUB invitation (set-password link) once the
 // membership is active — once, see _shared/invitations.ts.
+// checkout.session.completed / async_payment_succeeded with the refundable call deposit
+// price (_shared/deposit.ts) marks the application (client_reference_id = questionnaire
+// token) paid; other checkout sessions are ignored.
 // The yearly membership is sold as one year, not a renewing plan: a yearly
 // subscription is set to cancel at period end,
 // so Stripe ends it after a year (subscription.deleted → membership ended).
@@ -29,6 +32,7 @@
 // retries — and "Resend" — process it again). Everything else 200.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isDeposit, markDepositPaid } from "../_shared/deposit.ts";
 import { inviteIfCreatedBy } from "../_shared/invitations.ts";
 import { importContact, removeFromContactlists } from "../_shared/smartemailing.ts";
 import { type Env, type StripeObject, stripeGet, stripePost, verifyStripeSignature } from "../_shared/stripe.ts";
@@ -45,6 +49,10 @@ const SUBSCRIPTION_EVENTS = new Set([
 const INVOICE_EVENTS = new Set([
   "invoice.paid",
   "invoice.payment_failed",
+]);
+const CHECKOUT_EVENTS = new Set([
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
 ]);
 
 const supabase = createClient(
@@ -86,6 +94,40 @@ function subscriptionIdOf(event: StripeObject): string | null {
   return null;
 }
 
+// Idempotency: first writer wins. False = already processed, skip it.
+async function claimEvent(event: StripeObject): Promise<boolean> {
+  const { error } = await supabase
+    .from("stripe_events")
+    .insert({ id: event.id, type: event.type, livemode: event.livemode ?? null });
+  if (!error) return true;
+  if (error.code === "23505") {
+    console.log(`[stripe] ${event.id} already processed`);
+    return false;
+  }
+  // Can't record the event — still process; the handlers are idempotent.
+  console.error(`[db] stripe_events insert failed: ${error.message}`);
+  return true;
+}
+
+// Refundable call deposit paid → consultation_applications.deposit_paid.
+async function handleDeposit(event: StripeObject, stripeKey: string): Promise<Response> {
+  const obj = event.data?.object ?? {};
+  if (obj.mode !== "payment") return json(200, { received: true, ignored: "not a payment" });
+  if (!(await claimEvent(event))) return json(200, { received: true, duplicate: true });
+  try {
+    const session = await stripeGet(`checkout/sessions/${encodeURIComponent(obj.id)}?expand[]=line_items`, stripeKey);
+    if (!isDeposit(session)) return json(200, { received: true, ignored: "not a deposit" });
+    const paid = await markDepositPaid(supabase, session);
+    if (!paid) console.log(`[deposit] ${session.id} not marked (${session.payment_status})`);
+    return json(200, { received: true, deposit_paid: paid });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[deposit] ${event.id} ${obj.id}: ${message}`);
+    await supabase.from("stripe_events").delete().eq("id", event.id);
+    return json(500, { error: message });
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
 
@@ -118,6 +160,8 @@ Deno.serve(async (req) => {
     console.warn(`[stripe] ${event.id} livemode=${event.livemode} but env=${env}`);
   }
 
+  if (CHECKOUT_EVENTS.has(event.type)) return await handleDeposit(event, stripeKey);
+
   if (!SUBSCRIPTION_EVENTS.has(event.type) && !INVOICE_EVENTS.has(event.type)) {
     return json(200, { received: true, ignored: event.type });
   }
@@ -128,18 +172,7 @@ Deno.serve(async (req) => {
     return json(200, { received: true, ignored: "no subscription" });
   }
 
-  // Idempotency: first writer wins, repeats are skipped.
-  const { error: insertError } = await supabase
-    .from("stripe_events")
-    .insert({ id: event.id, type: event.type, livemode: event.livemode ?? null });
-  if (insertError) {
-    if (insertError.code === "23505") {
-      console.log(`[stripe] ${event.id} already processed`);
-      return json(200, { received: true, duplicate: true });
-    }
-    // Can't record the event — still process; the sync is idempotent.
-    console.error(`[db] stripe_events insert failed: ${insertError.message}`);
-  }
+  if (!(await claimEvent(event))) return json(200, { received: true, duplicate: true });
 
   try {
     const sub = await stripeGet(

@@ -9,13 +9,15 @@ Dve aplikácie, jeden Supabase projekt:
 
 | Aplikácia | Čo v nej žije |
 | --- | --- |
-| **WEB** (trenerzien.sk) | dotazník + výber termínu + potvrdenie — [WEB](#web--rezervácia-pohovoru) |
+| **WEB** (trenerzien.sk) | dotazník + vratná záloha 100 € + výber termínu + potvrdenie — [WEB](#web--rezervácia-pohovoru), [Záloha](#záloha-100-) |
 | **KLUB** | personalistky (rola `personalistka`) si nastavujú dostupnosť na mesiac dopredu — [KLUB](#klub--dostupnosť-personalistiek) |
 
 ```
 krok 1 dotazník ──insert (s tokenom)──▶ consultation_applications
-krok 2 výber    ──rpc booking_slots()──▶ voľné termíny (helper × čas)
-       potvrdiť ──POST book-meeting────▶ book_appointment()  ── 'pending' (DB zamkne slot)
+krok 2 záloha   ──platobná stránka webu (client_reference_id = token)──▶ stripe-webhook → deposit_paid
+krok 3 výber    ──rpc booking_slots()──▶ voľné termíny (helper × čas)
+       potvrdiť ──POST book-meeting────▶ záloha zaplatená? (BOOKING_DEPOSIT_REQUIRED)
+                                         book_appointment()  ── 'pending' (DB zamkne slot)
                                          Google Calendar       ── udalosť + Meet link, pozvánka len vlastníkovi
                                          appointments          ── 'confirmed'
                                          SmartEmailing         ── e-mail + .ics leadovi a helperovi
@@ -115,11 +117,47 @@ if (error) {
 | 400 | `invalid_request` | chyba vo fronte |
 | 404 | `application_not_found` | späť na dotazník |
 | 403 | `not_qualified` | zobraz `message` |
+| 402 | `deposit_required` | záloha nie je zaplatená → späť na platbu zálohy (len s `BOOKING_DEPOSIT_REQUIRED=true`) |
 | 409 | `already_booked` | zobraz existujúci termín z `appointment` (dvojklik / reload) |
 | 409 | `slot_unavailable` | znova načítaj `booking_slots`, nech vyberie iný |
 | 502 | `calendar_unavailable` | slot je uvoľnený, „skús znova“ |
 
 Admin: správa `helpers` a `booking_settings`, prehľad `appointments` (dotazy ako v sekcii KLUB, bez filtra na helpera).
+
+## Záloha 100 €
+
+Pred výberom termínu lead zaplatí **vratnú zálohu 100 €** (filter na nekvalifikované
+prihlášky) na platobnej stránke webu (Lovable). Admin ju po pohovore vráti ručne
+v Stripe —
+[ZALOHA_VRATENIE.md](supabase/web/ZALOHA_VRATENIE.md).
+Frontend: [LOVABLE_ZALOHA.md](supabase/web/LOVABLE_ZALOHA.md).
+
+| Čo | Správanie |
+| --- | --- |
+| Stripe cena | lookup key **`vstupny_pohovor_zaloha_100`** (100 EUR, jednorazová) |
+| Web | Checkout / Payment Link s **`client_reference_id` = token dotazníka** — podľa neho sa platba spáruje s prihláškou |
+| `stripe-webhook` | `checkout.session.completed`, `checkout.session.async_payment_succeeded`: session (`expand[]=line_items`) s cenou zálohy, `payment_status = paid` → `deposit_paid`, `deposit_paid_at`, `deposit_session_id`, `deposit_payment_intent_id` (16.sql). Bez `client_reference_id` alebo s neznámym tokenom → len `[deposit] …` chyba v logoch (platbu treba spárovať ručne: `update consultation_applications set deposit_paid = true, deposit_paid_at = now() where email = …`) |
+| `book-meeting` | `BOOKING_DEPOSIT_REQUIRED=true` → bez zaplatenej zálohy 402 `deposit_required`; kto už má rezerváciu, dostane `already_booked` ako doteraz |
+| Opt-in / vypršaný termín | záloha ostáva na prihláške, nový termín sa neplatí znova |
+
+Zápis zaplatenia je idempotentný. Druhá zaplatená session tej istej prihlášky sa len
+zaloguje (`[deposit] … paid twice`), jednu platbu treba vrátiť.
+
+**Stripe nastavenie (raz):** na oboch endpointoch `stripe-webhook?env=live` a `?env=test`
+pridaj eventy `checkout.session.completed` a `checkout.session.async_payment_succeeded`.
+Ak je `STRIPE_SECRET_KEY_LIVE` / `_TEST` reštriktovaný (`rk_…`), pridaj mu
+**Checkout Sessions: Read**.
+
+**Nasadenie:** `supabase/web/bin/27-deposit.sh` (16.sql + deploy, záloha zatiaľ nepovinná) →
+Lovable nasadí krok so zálohou → `27-deposit.sh on`. Návrat: `27-deposit.sh off`.
+
+```sql
+-- zaplatené zálohy (na vrátenie)
+select c.created_at at time zone 'Europe/Bratislava' as prihlaska, c.name, c.email, c.deposit_paid_at,
+       c.deposit_payment_intent_id, a.starts_at at time zone 'Europe/Bratislava' as pohovor, a.status
+from consultation_applications c left join appointments a on a.application_id = c.id and a.status <> 'cancelled'
+where c.deposit_paid order by c.deposit_paid_at desc;
+```
 
 ## KLUB — dostupnosť personalistiek
 
@@ -270,7 +308,8 @@ from appointments a join helpers h on h.id = a.helper_id join consultation_appli
 where a.starts_at > now() and a.status = 'confirmed' order by a.starts_at;
 ```
 
-- Logy: Dashboard → Edge Functions → `book-meeting` (`[book]`, `[google]`, `[email]`).
+- Logy: Dashboard → Edge Functions → `book-meeting` (`[book]`, `[google]`, `[email]`);
+  záloha: `stripe-webhook` (`[deposit]`).
 - `calendar_error: … invalid_grant` v `cancel_reason` → refresh token zneplatnený
   → znova `11-google-refresh-token.sh` + `12-set-booking-secrets.sh`.
 - Zmena dĺžky / predstihu: `update booking_settings set …` (bez deployu).

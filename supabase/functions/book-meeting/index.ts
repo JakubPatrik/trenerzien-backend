@@ -1,4 +1,5 @@
-// Booking of the consultation call (step 2 after the consultation_applications form).
+// Booking of the consultation call (after the consultation_applications form and, with
+// BOOKING_DEPOSIT_REQUIRED, the deposit).
 //
 // Endpoint: POST https://<ref>.supabase.co/functions/v1/book-meeting
 //   body: { token, starts_at, helper_id? }  (token = consultation_applications.token,
@@ -17,8 +18,14 @@
 // 'confirmed', emails to the lead, the helper and the owner, list 615.
 // → 200 { appointment: { …, status: "confirmed", meet_link } }
 //
-// Secrets: BOOKING_DOUBLE_OPT_IN (optional, "true" = double opt-in), BOOKING_ALLOWED_ORIGINS
-// (see _shared/http.ts), the ones in _shared/booking.ts; SUPABASE_URL,
+// BOOKING_DEPOSIT_REQUIRED=true (supabase/web/LOVABLE_ZALOHA.md): only an application
+// with the refundable deposit paid (deposit_paid, set by stripe-webhook) can book →
+// otherwise 402 deposit_required. An application that already has a booking skips the
+// check, so already_booked works as before.
+//
+// Secrets: BOOKING_DOUBLE_OPT_IN (optional, "true" = double opt-in), BOOKING_DEPOSIT_REQUIRED
+// (optional, "true" = deposit first), BOOKING_ALLOWED_ORIGINS (see _shared/http.ts), the
+// ones in _shared/booking.ts; SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY (built in).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -35,6 +42,7 @@ import {
 } from "../_shared/booking.ts";
 
 const DOUBLE_OPT_IN = Deno.env.get("BOOKING_DOUBLE_OPT_IN") === "true";
+const DEPOSIT_REQUIRED = Deno.env.get("BOOKING_DEPOSIT_REQUIRED") === "true";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -47,6 +55,7 @@ const ERRORS: Record<string, { status: number; message: string }> = {
   invalid_request: { status: 400, message: "Neplatná požiadavka." },
   application_not_found: { status: 404, message: "Prihláška sa nenašla. Vyplň prosím dotazník znova." },
   not_qualified: { status: 403, message: "Na pohovor sa momentálne nedá rezervovať." },
+  deposit_required: { status: 402, message: "Pred výberom termínu je potrebné uhradiť vratnú zálohu 100 €." },
   already_booked: { status: 409, message: "Termín už máš rezervovaný." },
   slot_unavailable: { status: 409, message: "Tento termín už nie je voľný. Vyber si prosím iný." },
   calendar_unavailable: { status: 502, message: "Termín sa nepodarilo potvrdiť. Skús to prosím znova o chvíľu." },
@@ -80,6 +89,21 @@ Deno.serve(async (req) => {
     (helperId !== null && (typeof helperId !== "string" || !UUID_RE.test(helperId)))
   ) {
     return fail(req, "invalid_request");
+  }
+
+  // 0. Deposit paid? (Not for an existing booking: that one answers already_booked below.)
+  if (DEPOSIT_REQUIRED) {
+    const { data: app, error } = await supabase.from("consultation_applications").select("id, deposit_paid")
+      .eq("token", token).maybeSingle();
+    if (error) {
+      console.error(`[book] deposit check failed: ${error.message}`);
+      return fail(req, "server_error");
+    }
+    if (!app) return fail(req, "application_not_found");
+    if (!app.deposit_paid && !(await findByApplicationToken(supabase, token))) {
+      console.log(`[book] ${app.id} deposit not paid`);
+      return fail(req, "deposit_required");
+    }
   }
 
   // 1. Reserve (atomic; validates grid, availability, notice, horizon, overlaps).

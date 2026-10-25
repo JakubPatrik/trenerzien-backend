@@ -41,7 +41,7 @@ case "${1:-}" in
   on|off)
     value=$([ "$1" = on ] && echo true || echo false)
     if [ "$1" = on ]; then
-      confirm "Turn ON double opt-in on $REF? Only after the website (/pohovor/potvrdene) is live."
+      confirm "Turn ON double opt-in on $REF? Only after the website (/pohovor/potvrdenie) is live."
     else
       confirm "Turn OFF double opt-in on $REF? New bookings get the invitation right away again; existing holds still work."
     fi
@@ -103,4 +103,4 @@ echo ""
 echo ""
 status
 echo ""
-echo "Next: the website ships /pohovor/potvrdene, then: $0 on"
+echo "Next: the website ships /pohovor/potvrdenie + /pohovor/dakujem?t=, then: $0 on"

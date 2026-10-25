@@ -17,6 +17,12 @@ The sync finished: all 65 memberships are linked, none is still "lifetime", and 
 
 ## C. Call booking
 
+- [ ] **Refundable 100 € deposit** (`BOOKING.md` → Záloha): built, not deployed.
+  - [ ] Stripe: checkout events on both webhook endpoints; Checkout Sessions read on restricted keys.
+  - [ ] `supabase/web/bin/27-deposit.sh` (flag off).
+  - [ ] Lovable: `supabase/web/LOVABLE_ZALOHA.md` (token as `client_reference_id`); then `27-deposit.sh on` + one live payment, refunded.
+  - Refunds are manual in Stripe (`supabase/web/ZALOHA_VRATENIE.md`).
+
 - [x] **`5.sql`:** guides set availability per 1-hour slot on specific dates, up to 31 days ahead. A trigger on the `Sprievodkyňa klubu` membership keeps their guide record (`helpers` row) up to date.
 - [x] **4.sql + 5.sql applied to production** (`08`), and guide records backfilled (`14`). All 8 guides are active, and 2 dated availability slots already exist.
 - [x] **SmartEmailing secrets** are set.
