@@ -9,10 +9,11 @@ import { findOrCreateUser } from "../_shared/users.ts";
 export type Plan = { name: string; months: number; contactlistId: number };
 
 // Routed by the ?plan= query param — each FAPI product has its own
-// notification URL. FAPI sells no monthly membership.
+// notification URL.
 // Names must match public.is_club_member() — it grants KLUB access by name.
 // contactlistId: SmartEmailing list "… členstvo - KLUB ODM - aktívne členky".
 export const PLANS: Record<string, Plan> = {
+  "1m": { name: "Členstvo — mesačné", months: 1, contactlistId: 624 }, // 297034 Mesačná spolupráca s trénerom ŽIEN + KLUB ODM
   "3m": { name: "Členstvo — štvrťročné", months: 3, contactlistId: 618 }, // 293713 Spolupráca s trénerom ŽIEN + KLUB ODM (3 mesiace)
   "1y": { name: "Členstvo — ročné", months: 12, contactlistId: 621 }, // 293719 Spolupráca s trénerom ŽIEN + KLUB ODM (1 rok)
 };

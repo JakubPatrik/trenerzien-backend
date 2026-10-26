@@ -1,6 +1,6 @@
 // FAPI webhook for KLUB purchases → public.memberships.
 //
-// Endpoint: https://<ref>.supabase.co/functions/v1/fapi-webhook?plan=3m|1y
+// Endpoint: https://<ref>.supabase.co/functions/v1/fapi-webhook?plan=1m|3m|1y
 // — one URL per FAPI product, plans in membership.ts.
 // Deployed with --no-verify-jwt (FAPI sends no Supabase token; we verify the
 // FAPI security hash instead). Set on each sales form as the "after payment"
