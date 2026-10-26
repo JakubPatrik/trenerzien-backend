@@ -7,7 +7,8 @@
 // Secrets:
 //   STRIPE_WEBHOOK_SECRET_TEST / _LIVE        whsec_… of THIS endpoint
 //   STRIPE_SECRET_KEY_TEST / _LIVE            secret key (reads subscriptions + customers,
-//                                             sets cancel_at_period_end on yearly ones)
+//                                             sets cancel_at_period_end on yearly ones,
+//                                             creates schedules for three-month ones)
 //   SMARTEMAILING_USERNAME, SMARTEMAILING_API_KEY   contact list sync + invitation
 //   SMARTEMAILING_SENDER_EMAIL                invitation sender
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   built in
@@ -26,6 +27,8 @@
 // The yearly membership is sold as one year, not a renewing plan: a yearly
 // subscription is set to cancel at period end,
 // so Stripe ends it after a year (subscription.deleted → membership ended).
+// The three-month membership continues monthly: a subscription schedule keeps
+// the first three-month period, then switches it to the monthly price.
 //
 // Responses: 400 for a bad request/signature, 500 when not configured or when
 // processing fails (the stripe_events row is removed, so Stripe's automatic
@@ -40,6 +43,10 @@ import { KLUB_CONTACTLISTS, syncSubscription } from "./membership.ts";
 
 // Lookup keys sold as a single year.
 const ONE_YEAR_LOOKUP_KEYS = new Set(["klub_rocne_clenstvo"]);
+// Three-month lookup key → the monthly lookup key it continues on after the first period.
+const THEN_MONTHLY_LOOKUP_KEYS: Record<string, string> = {
+  klub_stvrtrocne_clenstvo: "klub_mesacne_clenstvo",
+};
 
 const SUBSCRIPTION_EVENTS = new Set([
   "customer.subscription.created",
@@ -81,6 +88,55 @@ function shouldEndAfterOneYear(sub: StripeObject): boolean {
   if (sub.cancel_at_period_end || sub.cancel_at) return false;
   // deno-lint-ignore no-explicit-any
   return (sub.items?.data ?? []).some((i: any) => ONE_YEAR_LOOKUP_KEYS.has(i.price?.lookup_key));
+}
+
+// The three-month item of a subscription that isn't scheduled to move on yet
+// (sub.schedule is expanded; a schedule with a later phase is already set up).
+function itemToMoveToMonthly(sub: StripeObject): StripeObject | null {
+  if (sub.status !== "active" && sub.status !== "trialing") return null;
+  if (sub.cancel_at_period_end || sub.cancel_at) return null;
+  if ((sub.schedule?.phases?.length ?? 0) > 1) return null;
+  // deno-lint-ignore no-explicit-any
+  return (sub.items?.data ?? []).find((i: any) => THEN_MONTHLY_LOOKUP_KEYS[i.price?.lookup_key]) ?? null;
+}
+
+// Keeps the current phase until the end of the first period, then puts the
+// subscription on the monthly price and releases it (from there it renews
+// monthly like any monthly subscription). Phase 0 is re-sent as Stripe
+// returned it, so its discounts and trial survive the update.
+async function scheduleMonthlyAfterFirstPeriod(sub: StripeObject, item: StripeObject, stripeKey: string): Promise<string> {
+  const monthlyKey = THEN_MONTHLY_LOOKUP_KEYS[item.price.lookup_key];
+  const prices = await stripeGet(`prices?active=true&lookup_keys[]=${encodeURIComponent(monthlyKey)}`, stripeKey);
+  const monthly = prices.data?.[0];
+  if (!monthly) throw new Error(`no active price with lookup_key ${monthlyKey}`);
+
+  // Keyed so concurrent events (subscription.created + invoice.paid) share one schedule.
+  const schedule = sub.schedule ??
+    await stripePost("subscription_schedules", { from_subscription: sub.id }, stripeKey, `then-monthly-${sub.id}`);
+  const current = schedule.phases[0];
+  const params: Record<string, string> = {
+    end_behavior: "release",
+    proration_behavior: "none",
+    "phases[0][start_date]": String(current.start_date),
+    "phases[0][end_date]": String(current.end_date),
+    "phases[1][items][0][price]": monthly.id,
+    "phases[1][items][0][quantity]": String(item.quantity ?? 1),
+  };
+  // deno-lint-ignore no-explicit-any
+  current.items.forEach((i: any, n: number) => {
+    params[`phases[0][items][${n}][price]`] = idOf(i.price)!;
+    params[`phases[0][items][${n}][quantity]`] = String(i.quantity ?? 1);
+  });
+  // deno-lint-ignore no-explicit-any
+  (current.discounts ?? []).forEach((d: any, n: number) => {
+    if (d.discount) params[`phases[0][discounts][${n}][discount]`] = idOf(d.discount)!;
+    else if (d.promotion_code) params[`phases[0][discounts][${n}][promotion_code]`] = idOf(d.promotion_code)!;
+    else if (d.coupon) params[`phases[0][discounts][${n}][coupon]`] = idOf(d.coupon)!;
+  });
+  if (current.trial_end) params["phases[0][trial_end]"] = String(current.trial_end);
+
+  await stripePost(`subscription_schedules/${encodeURIComponent(schedule.id)}`, params, stripeKey);
+  return schedule.id;
 }
 
 // The event body's shape follows the endpoint's API version, so read the
@@ -176,7 +232,7 @@ Deno.serve(async (req) => {
 
   try {
     const sub = await stripeGet(
-      `subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=customer`,
+      `subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=customer&expand[]=schedule`,
       stripeKey,
     );
     const result = await syncSubscription(supabase, sub);
@@ -190,6 +246,13 @@ Deno.serve(async (req) => {
     if (shouldEndAfterOneYear(sub)) {
       await stripePost(`subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_period_end: "true" }, stripeKey);
       console.log(`[stripe] ${subscriptionId} set to cancel at period end (one-year membership)`);
+    }
+
+    // Also fires customer.subscription.updated; the re-sync sees the second phase and skips this.
+    const toMonthly = itemToMoveToMonthly(sub);
+    if (toMonthly) {
+      const scheduleId = await scheduleMonthlyAfterFirstPeriod(sub, toMonthly, stripeKey);
+      console.log(`[stripe] ${subscriptionId} → monthly after the first period (schedule ${scheduleId})`);
     }
 
     // A failure throws → 500, Stripe retries; the sync above is idempotent.

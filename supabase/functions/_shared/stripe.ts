@@ -78,13 +78,20 @@ export async function stripeGet(path: string, secretKey: string): Promise<Stripe
 }
 
 // POST https://api.stripe.com/v1/<path> with form-encoded params; throws like stripeGet.
-export async function stripePost(path: string, params: Record<string, string>, secretKey: string): Promise<StripeObject> {
+// idempotencyKey: Stripe returns the first result for repeats within 24 h.
+export async function stripePost(
+  path: string,
+  params: Record<string, string>,
+  secretKey: string,
+  idempotencyKey?: string,
+): Promise<StripeObject> {
   const res = await fetch(`${STRIPE_API}/${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${secretKey}`,
       "Stripe-Version": STRIPE_VERSION,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(params),
   });
